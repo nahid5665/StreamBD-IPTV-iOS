@@ -192,3 +192,22 @@ struct UserPlaylist: Identifiable, Codable, Hashable {
     var url: String
     var createdAt: Date = Date()
 }
+
+
+struct TmdbEpisode: Identifiable, Codable, Hashable {
+    let id: Int
+    let name: String?
+    let overview: String?
+    let episode_number: Int
+    let season_number: Int
+    let still_path: String?
+
+    var stillURL: String {
+        guard let s = still_path, !s.isEmpty else { return "" }
+        return "https://image.tmdb.org/t/p/w500\(s)"
+    }
+}
+
+struct TmdbSeasonDetailResponse: Codable {
+    let episodes: [TmdbEpisode]?
+}
