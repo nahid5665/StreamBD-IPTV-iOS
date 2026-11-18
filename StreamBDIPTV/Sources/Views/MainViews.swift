@@ -1,3 +1,4 @@
+import VLCKit
 import SwiftUI
 import AVKit
 import WebKit
@@ -716,11 +717,11 @@ struct NativeVideoPlayerSheet: View {
     let title: String
     let headers: [String: String]
     @Environment(\.dismiss) private var dismiss
-    @State private var player: AVPlayer = AVPlayer()
+    @State private var vlcPlayer: VLCMediaPlayer? = nil
 
     var body: some View {
         NavigationStack {
-            AVPlayerContainerView(player: player)
+            VLCPlayerContainerView(url: url, headers: headers, player: $vlcPlayer)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .background(Color.black.ignoresSafeArea())
                 .navigationTitle(title)
@@ -728,20 +729,14 @@ struct NativeVideoPlayerSheet: View {
                 .toolbar {
                     ToolbarItem(placement: .navigationBarTrailing) {
                         Button("Done") {
-                            player.pause()
+                            vlcPlayer?.stop()
                             dismiss()
                         }
                     }
                 }
-                .onAppear {
-                    let asset = AVURLAsset(url: url, options: ["AVURLAssetHTTPHeaderFieldsKey": headers])
-                    let item = AVPlayerItem(asset: asset)
-                    player.replaceCurrentItem(with: item)
-                    player.play()
-                }
                 .onDisappear {
-                    player.pause()
-                    player.replaceCurrentItem(with: nil)
+                    vlcPlayer?.stop()
+                    vlcPlayer = nil
                 }
         }
     }
