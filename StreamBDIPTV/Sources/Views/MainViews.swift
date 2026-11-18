@@ -1,5 +1,28 @@
 import SwiftUI
 
+struct EmptyStateView: View {
+    let title: String
+    let systemImage: String
+    let message: String
+
+    var body: some View {
+        VStack(spacing: 12) {
+            Image(systemName: systemImage)
+                .font(.system(size: 48))
+                .foregroundStyle(.secondary)
+            Text(title)
+                .font(.headline)
+            Text(message)
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+                .padding(.horizontal)
+        }
+        .padding()
+    }
+}
+
+
 struct LiveTVView: View {
     @ObservedObject var viewModel: MainViewModel
 
@@ -37,7 +60,7 @@ struct LiveTVView: View {
                     Spacer()
                 } else if viewModel.filteredChannels.isEmpty {
                     Spacer()
-                    ContentUnavailableView("No Channels Found", systemImage: "tv.slash", description: Text("Try another category or tap refresh."))
+                    EmptyStateView(title: "No Channels Found", systemImage: "tv.slash", message: "Try another category or tap refresh.")
                     Spacer()
                 } else {
                     ScrollView {
@@ -82,7 +105,7 @@ struct LiveTVView: View {
             .navigationTitle("StreamBD Live TV")
             .searchable(text: $viewModel.searchQuery, prompt: "Search channels & categories…")
             .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
+                ToolbarItem(placement: .navigationBarTrailing) {
                     Button {
                         Task { await viewModel.loadAllLiveChannels() }
                     } label: {
@@ -136,7 +159,7 @@ struct EventsView: View {
                     Spacer()
                 } else if viewModel.filteredEvents.isEmpty {
                     Spacer()
-                    ContentUnavailableView("No Events Found", systemImage: "sportscourt", description: Text("Pull to refresh or check back at match kickoff."))
+                    EmptyStateView(title: "No Events Found", systemImage: "sportscourt", message: "Pull to refresh or check back at match kickoff.")
                     Spacer()
                 } else {
                     List(viewModel.filteredEvents) { event in
@@ -197,7 +220,7 @@ struct EventsView: View {
                 }
             }
             .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
+                ToolbarItem(placement: .navigationBarTrailing) {
                     Button {
                         Task { await viewModel.loadEvents() }
                     } label: {
