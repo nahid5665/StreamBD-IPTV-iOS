@@ -33,77 +33,47 @@ final class MainViewModel: ObservableObject {
 
         var combined: [Channel] = []
 
-        // 1. Fetch remote categories from decrypted RemoteConfig IPTV.json
-        // The API returns either `{"playlists":{...}}` or `[{"playlists":{...}}]`
-        do {
-            let rawText = try await NetworkManager.shared.fetchText(from: AppConfig.iptvPlaylistURL)
-            guard let jsonData = rawText.data(using: .utf8) else { throw URLError(.cannotDecodeContentData) }
+        // 1. Build initial categories from ALL 44 BUNDLED PLAYLISTS
+        var categoryMap: [String: LiveCategory] = [:]
+        for pl in AppConfig.bundledPlaylists {
+            categoryMap[pl.name] = LiveCategory(name: pl.name, url: pl.url, logo: pl.logo)
+        }
 
+        // 2. Fetch remote categories from decrypted RemoteConfig IPTV.json (if available)
+        if let rawText = try? await NetworkManager.shared.fetchText(from: AppConfig.iptvPlaylistURL),
+           let jsonData = rawText.data(using: .utf8) {
             let decoder = JSONDecoder()
-            var playlistsDict: [String: PlaylistInfo] = [:]
+            var remoteDict: [String: PlaylistInfo] = [:]
 
-            // Try decoding as a single LiveCategoryResponse first
             if let single = try? decoder.decode(LiveCategoryResponse.self, from: jsonData) {
-                playlistsDict = single.playlists
-            }
-            // Then try as an array of LiveCategoryResponse (actual API format)
-            else if let arr = try? decoder.decode([LiveCategoryResponse].self, from: jsonData),
-                    let first = arr.first {
-                playlistsDict = first.playlists
-            }
-            // Fallback: try as raw JSON and extract manually
-            else if let rawJson = try? JSONSerialization.jsonObject(with: jsonData) {
-                var rootObj: [String: Any]? = nil
-                if let dict = rawJson as? [String: Any] {
-                    rootObj = dict
-                } else if let arr = rawJson as? [[String: Any]], let first = arr.first {
-                    rootObj = first
-                }
-                if let pls = rootObj?["playlists"] as? [String: [String: Any]] {
-                    for (name, info) in pls {
-                        if let url = info["url"] as? String {
-                            let logo = info["logo"] as? String
-                            playlistsDict[name] = PlaylistInfo(url: url, logo: logo)
-                        }
-                    }
-                }
+                remoteDict = single.playlists
+            } else if let arr = try? decoder.decode([LiveCategoryResponse].self, from: jsonData),
+                      let first = arr.first {
+                remoteDict = first.playlists
             }
 
-            var fetchedCategories: [LiveCategory] = []
-            for (catName, info) in playlistsDict.sorted(by: { $0.key < $1.key }) {
+            for (catName, info) in remoteDict {
                 let logoUrl = M3UParser.normalizeLogo(info.logo ?? "")
-                fetchedCategories.append(LiveCategory(name: catName, url: info.url, logo: logoUrl))
-            }
-            self.categories = fetchedCategories
-
-            // Fetch channels from each remote playlist concurrently
-            await withTaskGroup(of: [Channel].self) { group in
-                for cat in fetchedCategories {
-                    group.addTask {
-                        await Self.fetchCategoryChannels(category: cat)
-                    }
-                }
-                for await catChannels in group {
-                    combined.append(contentsOf: catChannels)
-                }
-            }
-        } catch {
-            self.errorMessage = "Remote catalog note: \(error.localizedDescription)"
-        }
-
-        // 2. Also execute bundled JS Playlists (Server 1 Jio, Server 2 Jio, PlusBox)
-        for bundledJs in ["server1_jio", "server2_jio", "plusbox"] {
-            if let path = Bundle.main.path(forResource: bundledJs, ofType: "js"),
-               let script = try? String(contentsOfFile: path, encoding: .utf8) {
-                let m3u = await JSRunner.shared.executePlaylistScript(script)
-                if !m3u.isEmpty {
-                    let parsed = M3UParser.parsePlaylist(m3u, defaultGroup: bundledJs.uppercased())
-                    combined.append(contentsOf: parsed)
-                }
+                categoryMap[catName] = LiveCategory(name: catName, url: info.url, logo: logoUrl)
             }
         }
 
-        // 3. Merge metadata/logos from bundled assets/channels.json
+        let finalCategories = categoryMap.values.sorted(by: { $0.name < $1.name })
+        self.categories = finalCategories
+
+        // 3. Concurrently fetch channels from all 44 playlists
+        await withTaskGroup(of: [Channel].self) { group in
+            for cat in finalCategories {
+                group.addTask {
+                    await Self.fetchCategoryChannels(category: cat)
+                }
+            }
+            for await catChannels in group {
+                combined.append(contentsOf: catChannels)
+            }
+        }
+
+        // 4. Merge metadata & logos from bundled assets/channels.json
         let bundledLogoMap = Self.loadBundledLogoMap()
         for idx in combined.indices {
             if combined[idx].logo.isEmpty,
@@ -112,7 +82,7 @@ final class MainViewModel: ObservableObject {
             }
         }
 
-        // Deduplicate by name + url while preserving multi-source entries
+        // 5. Deduplicate channels by name while preserving multi-server streaming sources
         var seen: [String: Int] = [:]
         var deduped: [Channel] = []
         for ch in combined {
@@ -146,7 +116,6 @@ final class MainViewModel: ObservableObject {
         return M3UParser.parsePlaylist(trimmed, defaultGroup: category.name)
     }
 
-    /// Mirrors `Lm6/a` (`myiptv://proxy?url=...&array_path=...&stream_field=...&title_field=...`)
     static func fetchMagicProxyChannels(proxyUrl: String, defaultGroup: String) async -> [Channel] {
         guard let components = URLComponents(string: proxyUrl) else { return [] }
         let params = Dictionary(uniqueKeysWithValues: (components.queryItems ?? []).map { ($0.name, $0.value ?? "") })
