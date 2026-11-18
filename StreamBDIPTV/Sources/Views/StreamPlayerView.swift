@@ -15,20 +15,21 @@ struct VLCPlayerContainerView: UIViewRepresentable {
 
         let media = VLCMedia(url: url)
 
-        for (k, v) in headers {
-            media.addOptions([":http-header=\(k): \(v)"])
-        }
+        var vlcOptions: [AnyHashable: Any] = [
+            ":network-caching": 3000,
+            ":clock-jitter": 0,
+            ":clock-synchro": 0
+        ]
         if let ua = headers["User-Agent"] {
-            media.addOptions([":http-user-agent=\(ua)"])
+            vlcOptions[":http-user-agent"] = ua
         }
         if let ref = headers["Referer"] {
-            media.addOptions([":http-referrer=\(ref)"])
+            vlcOptions[":http-referrer"] = ref
         }
-        media.addOptions([
-            ":network-caching=3000",
-            ":clock-jitter=0",
-            ":clock-synchro=0"
-        ])
+        for (k, v) in headers {
+            vlcOptions[":http-header"] = "\(k): \(v)"
+        }
+        media.addOptions(vlcOptions)
 
         mediaPlayer.media = media
         mediaPlayer.play()
@@ -229,20 +230,21 @@ struct StreamPlayerSheet: View {
 
         if let player = vlcPlayer {
             let media = VLCMedia(url: streamURL)
-            for (k, v) in resolvedHeaders {
-                media.addOptions([":http-header=\(k): \(v)"])
-            }
+            var vlcOptions: [AnyHashable: Any] = [
+                ":network-caching": 3000,
+                ":clock-jitter": 0,
+                ":clock-synchro": 0
+            ]
             if let ua = resolvedHeaders["User-Agent"] {
-                media.addOptions([":http-user-agent=\(ua)"])
+                vlcOptions[":http-user-agent"] = ua
             }
             if let ref = resolvedHeaders["Referer"] {
-                media.addOptions([":http-referrer=\(ref)"])
+                vlcOptions[":http-referrer"] = ref
             }
-            media.addOptions([
-                ":network-caching=3000",
-                ":clock-jitter=0",
-                ":clock-synchro=0"
-            ])
+            for (k, v) in resolvedHeaders {
+                vlcOptions[":http-header"] = "\(k): \(v)"
+            }
+            media.addOptions(vlcOptions)
             player.media = media
             player.play()
             isPlaying = true
