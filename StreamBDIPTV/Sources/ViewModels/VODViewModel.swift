@@ -9,6 +9,7 @@ final class VODViewModel: ObservableObject {
     @Published var banglaMovies: [TmdbMedia] = []
     @Published var bollywoodMovies: [TmdbMedia] = []
     @Published var searchResults: [TmdbMedia] = []
+    @Published var addons: [Addon] = AppConfig.bundledAddons
     @Published var searchQuery: String = ""
     @Published var isLoading: Bool = false
     @Published var selectedMedia: TmdbMedia? = nil
@@ -39,6 +40,10 @@ final class VODViewModel: ObservableObject {
             TmdbResponse<TmdbMedia>.self,
             from: "\(base)/movie/top_rated?api_key=\(key)&language=en-US"
         )
+        async let remoteAddons: [Addon]? = try? NetworkManager.shared.fetchDecodable(
+            [Addon].self,
+            from: AppConfig.addonRegistryURL
+        )
 
         let loadedMovies = (await tm)?.results ?? []
         let loadedTV = (await tv)?.results ?? []
@@ -47,6 +52,10 @@ final class VODViewModel: ObservableObject {
         self.banglaMovies = (await bn)?.results ?? []
         self.bollywoodMovies = (await hi)?.results ?? []
         self.top10Media = Array(((await top)?.results ?? loadedMovies).prefix(10))
+
+        if let fetchedAddons = await remoteAddons, !fetchedAddons.isEmpty {
+            self.addons = fetchedAddons
+        }
 
         if self.featuredMedia == nil {
             self.featuredMedia = loadedMovies.first ?? loadedTV.first
@@ -67,10 +76,11 @@ final class VODViewModel: ObservableObject {
         }
     }
 
-    /// Fetches all playable streams for a movie or TV episode (BDIX + Global Embeds)
+    /// Resolves all available BDIX FTP servers + Global stream sources for a title
     func resolveStreams(for media: TmdbMedia, season: Int = 1, episode: Int = 1) async -> [StreamSource] {
         var sources: [StreamSource] = []
         let isTV = !media.isMovie
+        let id = media.id
 
         // 1. Live BDIX CineplexBD Scraping (Ultra fast in Bangladesh)
         let cineplexSources = await CineplexScraper.shared.resolveStreams(
@@ -81,8 +91,7 @@ final class VODViewModel: ObservableObject {
         )
         sources.append(contentsOf: cineplexSources)
 
-        // 2. High-Speed Global Embed Streaming Servers
-        let id = media.id
+        // 2. High-Speed Global Streaming Servers & Multi-Embeds
         if isTV {
             sources.append(StreamSource(
                 url: "https://vidsrc.me/embed/tv?tmdb=\(id)&season=\(season)&episode=\(episode)",
@@ -100,6 +109,12 @@ final class VODViewModel: ObservableObject {
                 url: "https://superembed.stream/?video_id=\(id)&tmdb=1&s=\(season)&e=\(episode)",
                 quality: "Auto",
                 provider: "SuperEmbed (Server 4)",
+                type: "embed"
+            ))
+            sources.append(StreamSource(
+                url: "https://www.2embed.cc/embedtv/\(id)&s=\(season)&e=\(episode)",
+                quality: "HD",
+                provider: "2Embed (Server 5)",
                 type: "embed"
             ))
         } else {
@@ -121,12 +136,17 @@ final class VODViewModel: ObservableObject {
                 provider: "SuperEmbed (Server 4)",
                 type: "embed"
             ))
+            sources.append(StreamSource(
+                url: "https://www.2embed.cc/embed/\(id)",
+                quality: "HD",
+                provider: "2Embed (Server 5)",
+                type: "embed"
+            ))
         }
 
         return sources
     }
 
-    /// Fetches TV Show Seasons
     func fetchTvSeasons(tvId: Int) async -> [TmdbSeason] {
         let url = "\(AppConfig.tmdbBaseURL)/tv/\(tvId)?api_key=\(AppConfig.tmdbApiKey)&language=en-US"
         guard let details = try? await NetworkManager.shared.fetchDecodable(TmdbTvShowDetails.self, from: url) else {
@@ -135,7 +155,6 @@ final class VODViewModel: ObservableObject {
         return (details.seasons ?? []).filter { $0.season_number > 0 }
     }
 
-    /// Fetches TV Episodes for a season
     func fetchSeasonEpisodes(tvId: Int, seasonNumber: Int) async -> [TmdbEpisode] {
         let url = "\(AppConfig.tmdbBaseURL)/tv/\(tvId)/season/\(seasonNumber)?api_key=\(AppConfig.tmdbApiKey)&language=en-US"
         guard let res = try? await NetworkManager.shared.fetchDecodable(TmdbSeasonDetailResponse.self, from: url) else {
