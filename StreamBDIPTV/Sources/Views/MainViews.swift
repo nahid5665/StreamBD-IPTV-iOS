@@ -989,7 +989,7 @@ struct NetflixSearchView: View {
             .background(Color.black.ignoresSafeArea())
             .navigationTitle("Search")
             .searchable(text: $vodVM.searchQuery, prompt: "Search movies, shows & channels…")
-            .onChange(of: vodVM.searchQuery) { _, newValue in
+            .onChange(of: vodVM.searchQuery) { newValue in
                 liveVM.searchQuery = newValue
                 Task { await vodVM.search() }
             }
