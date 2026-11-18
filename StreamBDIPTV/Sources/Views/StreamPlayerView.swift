@@ -1,33 +1,56 @@
 import SwiftUI
-import AVKit
+import VLCKit
 
-struct AVPlayerContainerView: UIViewControllerRepresentable {
-    let player: AVPlayer
+struct VLCPlayerContainerView: UIViewRepresentable {
+    let url: URL
+    let headers: [String: String]
+    @Binding var player: VLCMediaPlayer?
 
-    func makeUIViewController(context: Context) -> AVPlayerViewController {
-        let controller = AVPlayerViewController()
-        controller.player = player
-        controller.allowsPictureInPicturePlayback = true
-        controller.canStartPictureInPictureAutomaticallyFromInline = true
-        controller.showsPlaybackControls = true
-        return controller
-    }
+    func makeUIView(context: Context) -> UIView {
+        let view = UIView(frame: .zero)
+        view.backgroundColor = .black
 
-    func updateUIViewController(_ uiViewController: AVPlayerViewController, context: Context) {
-        if uiViewController.player !== player {
-            uiViewController.player = player
+        let mediaPlayer = VLCMediaPlayer()
+        mediaPlayer.drawable = view
+
+        let media = VLCMedia(url: url)
+
+        for (k, v) in headers {
+            media.addOptions([":http-header=\(k): \(v)"])
         }
+        if let ua = headers["User-Agent"] {
+            media.addOptions([":http-user-agent=\(ua)"])
+        }
+        if let ref = headers["Referer"] {
+            media.addOptions([":http-referrer=\(ref)"])
+        }
+        media.addOptions([
+            ":network-caching=3000",
+            ":clock-jitter=0",
+            ":clock-synchro=0"
+        ])
+
+        mediaPlayer.media = media
+        mediaPlayer.play()
+
+        DispatchQueue.main.async {
+            self.player = mediaPlayer
+        }
+        return view
     }
+
+    func updateUIView(_ uiView: UIView, context: Context) {}
 }
 
 struct StreamPlayerSheet: View {
     let channel: Channel
     @Environment(\.dismiss) private var dismiss
 
-    @State private var player: AVPlayer = AVPlayer()
+    @State private var vlcPlayer: VLCMediaPlayer? = nil
     @State private var selectedSourceKey: String = ""
     @State private var currentRawUrl: String = ""
     @State private var statusMessage: String? = nil
+    @State private var isPlaying = true
 
     var sourceKeys: [String] {
         let keys = Array(channel.sources.keys).sorted()
@@ -37,12 +60,64 @@ struct StreamPlayerSheet: View {
     var body: some View {
         NavigationStack {
             VStack(spacing: 16) {
-                AVPlayerContainerView(player: player)
+                // Universal VLC / FFmpeg Player Container (Plays MKV, M3U8, TS, FLV, MP4)
+                if let url = URL(string: currentRawUrl), !currentRawUrl.isEmpty {
+                    VLCPlayerContainerView(
+                        url: url,
+                        headers: resolvedHeaders,
+                        player: $vlcPlayer
+                    )
                     .frame(maxWidth: .infinity)
                     .aspectRatio(16.0 / 9.0, contentMode: .fit)
                     .background(Color.black)
                     .clipShape(RoundedRectangle(cornerRadius: 12))
                     .padding(.horizontal)
+                } else {
+                    Rectangle()
+                        .fill(Color.black)
+                        .frame(maxWidth: .infinity)
+                        .aspectRatio(16.0 / 9.0, contentMode: .fit)
+                        .overlay(ProgressView("Loading Stream…"))
+                        .padding(.horizontal)
+                }
+
+                // Quick Playback Controls
+                HStack(spacing: 24) {
+                    Button {
+                        if let player = vlcPlayer {
+                            if player.isPlaying {
+                                player.pause()
+                                isPlaying = false
+                            } else {
+                                player.play()
+                                isPlaying = true
+                            }
+                        }
+                    } label: {
+                        Image(systemName: isPlaying ? "pause.fill" : "play.fill")
+                            .font(.title2)
+                            .foregroundStyle(.white)
+                            .padding(12)
+                            .background(Color.red)
+                            .clipShape(Circle())
+                    }
+
+                    Button {
+                        if let player = vlcPlayer {
+                            player.stop()
+                            player.play()
+                            isPlaying = true
+                        }
+                    } label: {
+                        Label("Reload Stream", systemImage: "arrow.clockwise")
+                            .font(.subheadline.bold())
+                            .foregroundStyle(.white)
+                            .padding(.horizontal, 16)
+                            .padding(.vertical, 8)
+                            .background(Color.white.opacity(0.15))
+                            .clipShape(Capsule())
+                    }
+                }
 
                 if sourceKeys.count > 1 {
                     ScrollView(.horizontal, showsIndicators: false) {
@@ -93,7 +168,7 @@ struct StreamPlayerSheet: View {
 
                         if let vlcUrl = URL(string: "vlc-x-callback://x-callback-url/stream?url=\(currentRawUrl.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? "")") {
                             Link(destination: vlcUrl) {
-                                Label("Open in VLC", systemImage: "play.rectangle.fill")
+                                Label("External VLC", systemImage: "play.rectangle.fill")
                                     .font(.footnote.weight(.medium))
                             }
                             .buttonStyle(.borderedProminent)
@@ -113,7 +188,7 @@ struct StreamPlayerSheet: View {
             .toolbar {
                 ToolbarItem(placement: .navigationBarTrailing) {
                     Button("Done") {
-                        player.pause()
+                        vlcPlayer?.stop()
                         dismiss()
                     }
                 }
@@ -125,16 +200,14 @@ struct StreamPlayerSheet: View {
                 playSource(rawLine: raw)
             }
             .onDisappear {
-                player.pause()
-                player.replaceCurrentItem(with: nil)
+                vlcPlayer?.stop()
+                vlcPlayer = nil
             }
         }
     }
 
-    private func playSource(rawLine: String) {
-        let parsed = M3UParser.parseUrlHeaders(rawLine)
-        currentRawUrl = parsed.cleanUrl
-
+    private var resolvedHeaders: [String: String] {
+        let parsed = M3UParser.parseUrlHeaders(currentRawUrl)
         var headers = channel.httpHeaders
         for (k, v) in parsed.headers { headers[k] = v }
         if let ua = channel.userAgent, headers["User-Agent"] == nil { headers["User-Agent"] = ua }
@@ -142,20 +215,38 @@ struct StreamPlayerSheet: View {
         if let ck = channel.cookie, headers["Cookie"] == nil { headers["Cookie"] = ck }
         if let org = channel.origin, headers["Origin"] == nil { headers["Origin"] = org }
         if headers["User-Agent"] == nil { headers["User-Agent"] = AppConfig.defaultUserAgent }
+        return headers
+    }
+
+    private func playSource(rawLine: String) {
+        let parsed = M3UParser.parseUrlHeaders(rawLine)
+        currentRawUrl = parsed.cleanUrl
 
         guard let streamURL = URL(string: parsed.cleanUrl) else {
             statusMessage = "Invalid stream URL"
             return
         }
 
-        // Configure AVURLAsset with custom HTTP headers (User-Agent, Referer, Cookie, Origin)
-        let options: [String: Any] = [
-            "AVURLAssetHTTPHeaderFieldsKey": headers
-        ]
-        let asset = AVURLAsset(url: streamURL, options: options)
-        let item = AVPlayerItem(asset: asset)
-        player.replaceCurrentItem(with: item)
-        player.play()
+        if let player = vlcPlayer {
+            let media = VLCMedia(url: streamURL)
+            for (k, v) in resolvedHeaders {
+                media.addOptions([":http-header=\(k): \(v)"])
+            }
+            if let ua = resolvedHeaders["User-Agent"] {
+                media.addOptions([":http-user-agent=\(ua)"])
+            }
+            if let ref = resolvedHeaders["Referer"] {
+                media.addOptions([":http-referrer=\(ref)"])
+            }
+            media.addOptions([
+                ":network-caching=3000",
+                ":clock-jitter=0",
+                ":clock-synchro=0"
+            ])
+            player.media = media
+            player.play()
+            isPlaying = true
+        }
         statusMessage = nil
     }
 }
