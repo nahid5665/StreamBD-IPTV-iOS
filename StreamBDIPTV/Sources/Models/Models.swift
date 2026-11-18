@@ -76,6 +76,14 @@ struct SportzfyEvent: Identifiable, Codable, Hashable {
     let id: String
     let parent: String?
     let enc_parent: String?
+
+    private enum CodingKeys: String, CodingKey {
+        case kind = "_kind"
+        case id, parent, enc_parent
+        case sport, league, round
+        case team_a_name, team_a_logo, team_b_name, team_b_logo
+        case starts_at, is_live, league_icon, priority
+    }
     let sport: String?
     let league: String?
     let round: String?
