@@ -111,7 +111,7 @@ struct StreamPlayerSheet: View {
             .navigationTitle(channel.name)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
+                ToolbarItem(placement: .navigationBarTrailing) {
                     Button("Done") {
                         player.pause()
                         dismiss()
