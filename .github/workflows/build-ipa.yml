@@ -7,7 +7,7 @@ on:
 
 jobs:
   build-ipa:
-    runs-on: macos-14
+    runs-on: macos-15
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v4
@@ -20,17 +20,7 @@ jobs:
 
       - name: Build Unsigned iOS App (arm64)
         run: |
-          xcodebuild clean build \
-            -project StreamBDIPTV.xcodeproj \
-            -scheme StreamBDIPTV \
-            -configuration Release \
-            -sdk iphoneos \
-            -derivedDataPath build \
-            ARCHS=arm64 \
-            ONLY_ACTIVE_ARCH=NO \
-            CODE_SIGN_IDENTITY="" \
-            CODE_SIGNING_REQUIRED=NO \
-            CODE_SIGNING_ALLOWED=NO
+          xcodebuild clean build             -project StreamBDIPTV.xcodeproj             -scheme StreamBDIPTV             -configuration Release             -sdk iphoneos             -derivedDataPath build             ARCHS=arm64             ONLY_ACTIVE_ARCH=NO             CODE_SIGN_IDENTITY=""             CODE_SIGNING_REQUIRED=NO             CODE_SIGNING_ALLOWED=NO
 
       - name: Package .app into Unsigned .ipa (LiveContainer / SideStore / Sideloadly Ready)
         run: |
