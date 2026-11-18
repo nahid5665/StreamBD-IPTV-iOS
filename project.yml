@@ -5,6 +5,11 @@ options:
     iOS: "16.0"
   xcodeVersion: "15.0"
 
+packages:
+  VLCKit:
+    url: https://github.com/rsalesas/VLCKit.git
+    from: "3.6.4"
+
 targets:
   StreamBDIPTV:
     type: application
@@ -15,6 +20,9 @@ targets:
       - path: StreamBDIPTV/Assets.xcassets
       - path: StreamBDIPTV/Resources
         buildPhase: resources
+    dependencies:
+      - package: VLCKit
+        product: VLCKit
     info:
       path: StreamBDIPTV/Info.plist
       properties:
