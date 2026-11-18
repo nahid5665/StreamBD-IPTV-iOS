@@ -34,13 +34,43 @@ final class MainViewModel: ObservableObject {
         var combined: [Channel] = []
 
         // 1. Fetch remote categories from decrypted RemoteConfig IPTV.json
+        // The API returns either `{"playlists":{...}}` or `[{"playlists":{...}}]`
         do {
-            let response = try await NetworkManager.shared.fetchDecodable(
-                LiveCategoryResponse.self,
-                from: AppConfig.iptvPlaylistURL
-            )
+            let rawText = try await NetworkManager.shared.fetchText(from: AppConfig.iptvPlaylistURL)
+            guard let jsonData = rawText.data(using: .utf8) else { throw URLError(.cannotDecodeContentData) }
+
+            let decoder = JSONDecoder()
+            var playlistsDict: [String: PlaylistInfo] = [:]
+
+            // Try decoding as a single LiveCategoryResponse first
+            if let single = try? decoder.decode(LiveCategoryResponse.self, from: jsonData) {
+                playlistsDict = single.playlists
+            }
+            // Then try as an array of LiveCategoryResponse (actual API format)
+            else if let arr = try? decoder.decode([LiveCategoryResponse].self, from: jsonData),
+                    let first = arr.first {
+                playlistsDict = first.playlists
+            }
+            // Fallback: try as raw JSON and extract manually
+            else if let rawJson = try? JSONSerialization.jsonObject(with: jsonData) {
+                var rootObj: [String: Any]? = nil
+                if let dict = rawJson as? [String: Any] {
+                    rootObj = dict
+                } else if let arr = rawJson as? [[String: Any]], let first = arr.first {
+                    rootObj = first
+                }
+                if let pls = rootObj?["playlists"] as? [String: [String: Any]] {
+                    for (name, info) in pls {
+                        if let url = info["url"] as? String {
+                            let logo = info["logo"] as? String
+                            playlistsDict[name] = PlaylistInfo(url: url, logo: logo)
+                        }
+                    }
+                }
+            }
+
             var fetchedCategories: [LiveCategory] = []
-            for (catName, info) in response.playlists.sorted(by: { $0.key < $1.key }) {
+            for (catName, info) in playlistsDict.sorted(by: { $0.key < $1.key }) {
                 let logoUrl = M3UParser.normalizeLogo(info.logo ?? "")
                 fetchedCategories.append(LiveCategory(name: catName, url: info.url, logo: logoUrl))
             }
