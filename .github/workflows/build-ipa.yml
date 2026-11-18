@@ -18,15 +18,27 @@ jobs:
       - name: Generate Xcode Project
         run: xcodegen generate
 
+      - name: Resolve Swift Packages
+        run: xcodebuild -resolvePackageDependencies -project StreamBDIPTV.xcodeproj
+
       - name: Build Unsigned iOS App (arm64)
         run: |
-          xcodebuild clean build             -project StreamBDIPTV.xcodeproj             -scheme StreamBDIPTV             -configuration Release             -sdk iphoneos             -derivedDataPath build             ARCHS=arm64             ONLY_ACTIVE_ARCH=NO             CODE_SIGN_IDENTITY=""             CODE_SIGNING_REQUIRED=NO             CODE_SIGNING_ALLOWED=NO
+          xcodebuild clean build \
+            -project StreamBDIPTV.xcodeproj \
+            -scheme StreamBDIPTV \
+            -configuration Release \
+            -sdk iphoneos \
+            -derivedDataPath build \
+            ARCHS=arm64 \
+            ONLY_ACTIVE_ARCH=NO \
+            CODE_SIGN_IDENTITY="" \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGNING_ALLOWED=NO
 
       - name: Package .app into Unsigned .ipa (LiveContainer / SideStore / Sideloadly Ready)
         run: |
           mkdir -p Payload
           cp -r build/Build/Products/Release-iphoneos/StreamBDIPTV.app Payload/
-          ldid -S Payload/StreamBDIPTV.app/StreamBDIPTV || true
           zip -r9 StreamBD-IPTV-v5.0-iOS.ipa Payload
 
       - name: Upload Unsigned IPA Artifact
