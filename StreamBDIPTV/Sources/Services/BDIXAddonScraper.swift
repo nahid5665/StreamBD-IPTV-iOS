@@ -3,174 +3,252 @@ import Foundation
 final class BDIXAddonScraper {
     static let shared = BDIXAddonScraper()
 
-    private let userAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+    private let defaultUA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+    private let androidUA = "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.0.0 Mobile Safari/537.36"
 
     private init() {}
 
-    /// Resolves streams across all major StreamBD Addon providers
+    /// Resolves streams across all verified StreamBD Addon providers.
+    /// ONLY returns addons that actually have the title. No dummy or fake fallback links!
     func resolveAllAddons(title: String, year: String, isTV: Bool, season: Int, episode: Int, tmdbId: Int) async -> [StreamSource] {
         var results: [StreamSource] = []
 
-        // 1. CineplexBD BDIX
-        let cineplexStreams = await CineplexScraper.shared.resolveStreams(
+        // Run scrapers in parallel
+        async let cineplexTask = CineplexScraper.shared.resolveStreams(
             title: title,
             isTV: isTV,
             season: season,
             episode: episode
         )
+        async let ctgTask = resolveCtgMovies(title: title, tmdbId: tmdbId, isTV: isTV, season: season, episode: episode)
+        async let roarTask = resolveRoarZone(title: title, isTV: isTV)
+        async let vixTask = resolveVixSrc(tmdbId: tmdbId, isTV: isTV, season: season, episode: episode)
+
+        let cineplexStreams = await cineplexTask
+        let ctgStreams = await ctgTask
+        let roarStreams = await roarTask
+        let vixStreams = await vixTask
+
         results.append(contentsOf: cineplexStreams)
-
-        // 2. CTG Movies FTP (BDIX)
-        if let ctgStream = await resolveCtgMovies(title: title, year: year, isTV: isTV, season: season, episode: episode) {
-            results.append(ctgStream)
-        }
-
-        // 3. RoarZone EMBY / FTP (BDIX)
-        if let roarStream = await resolveRoarZone(title: title, isTV: isTV, season: season, episode: episode) {
-            results.append(roarStream)
-        }
-
-        // 4. 11Plus WEB (BDIX)
-        if let elevenStream = await resolve11Plus(title: title, isTV: isTV, season: season, episode: episode) {
-            results.append(elevenStream)
-        }
-
-        // 5. Net Mirror (VIP Server)
-        results.append(resolveNetMirror(title: title, tmdbId: tmdbId, isTV: isTV, season: season, episode: episode))
-
-        // 6. Global High-Speed Streaming Embeds (Universal fallback)
-        results.append(contentsOf: resolveGlobalEmbeds(tmdbId: tmdbId, isTV: isTV, season: season, episode: episode))
+        results.append(contentsOf: ctgStreams)
+        results.append(contentsOf: roarStreams)
+        results.append(contentsOf: vixStreams)
 
         return results
     }
 
-    // MARK: - CTG Movies BDIX FTP Scraper
-    private func resolveCtgMovies(title: String, year: String, isTV: Bool, season: Int, episode: Int) async -> StreamSource? {
-        let clean = title.replacingOccurrences(of: " ", with: "+").addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? ""
-        let searchUrlStr = "http://movie.ctgmovies.com/search.php?query=\(clean)"
+    // MARK: - 1. CTG Movies BDIX FTP Scraper (Authentic Cockpit API + Next.js RSC Watch Payload)
+    private func resolveCtgMovies(title: String, tmdbId: Int, isTV: Bool, season: Int, episode: Int) async -> [StreamSource] {
+        let loginUrlStr = "https://cockpit.ctgmovies.com/api/v1/auth/login"
+        guard let loginUrl = URL(string: loginUrlStr) else { return [] }
 
-        guard let url = URL(string: searchUrlStr) else { return nil }
-        var req = URLRequest(url: url)
-        req.setValue(userAgent, forHTTPHeaderField: "User-Agent")
-        req.timeoutInterval = 6
+        var loginReq = URLRequest(url: loginUrl)
+        loginReq.httpMethod = "POST"
+        loginReq.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        loginReq.setValue(androidUA, forHTTPHeaderField: "User-Agent")
+        loginReq.setValue("https://ctgmovies.com", forHTTPHeaderField: "Origin")
+        loginReq.setValue("https://ctgmovies.com/", forHTTPHeaderField: "Referer")
+        loginReq.timeoutInterval = 7
+        loginReq.httpBody = try? JSONSerialization.data(withJSONObject: [
+            "email": "gobop98171@joystill.com",
+            "password": "Joy1971"
+        ])
 
-        if let (data, _) = try? await URLSession.shared.data(for: req),
-           let html = String(data: data, encoding: .utf8),
-           let link = extractFirstMatch(html, pattern: #"href=["'](http://movie\.ctgmovies\.com/[^"']+\.(?:mp4|mkv))["']"#) {
-            return StreamSource(
-                url: link,
-                quality: "1080P BDIX",
-                provider: "CTG Movies FTP (BDIX)",
+        guard let (loginData, loginResp) = try? await URLSession.shared.data(for: loginReq),
+              (loginResp as? HTTPURLResponse)?.statusCode == 200,
+              let loginJson = try? JSONSerialization.jsonObject(with: loginData) as? [String: Any],
+              let token = loginJson["token"] as? String else {
+            return []
+        }
+
+        // Search title
+        let path = isTV ? "series" : "movies"
+        guard let encodedTitle = title.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed),
+              let searchUrl = URL(string: "https://cockpit.ctgmovies.com/api/v1/\(path)?search=\(encodedTitle)&limit=24") else {
+            return []
+        }
+
+        var searchReq = URLRequest(searchUrl)
+        searchReq.setValue("Bearer \(token)", forHTTPHeaderField: "authorization")
+        searchReq.setValue(token, forHTTPHeaderField: "x-auth-token")
+        searchReq.setValue(androidUA, forHTTPHeaderField: "User-Agent")
+        searchReq.timeoutInterval = 7
+
+        guard let (searchData, searchResp) = try? await URLSession.shared.data(for: searchReq),
+              (searchResp as? HTTPURLResponse)?.statusCode == 200,
+              let searchJson = try? JSONSerialization.jsonObject(with: searchData) as? [String: Any] else {
+            return []
+        }
+
+        let items = (searchJson["movies"] as? [[String: Any]]) ??
+                    (searchJson["series"] as? [[String: Any]]) ??
+                    (searchJson["data"] as? [[String: Any]]) ?? []
+
+        // Match TMDB ID or title
+        var matchedItem: [String: Any]? = nil
+        for it in items {
+            if let tId = it["tmdb_id"], String(describing: tId) == String(tmdbId) {
+                matchedItem = it
+                break
+            }
+        }
+        if matchedItem == nil {
+            let lowerTitle = title.lowercased()
+            for it in items {
+                let itTitle = (it["title"] as? String ?? it["name"] as? String ?? "").lowercased()
+                if itTitle.contains(lowerTitle) || lowerTitle.contains(itTitle) {
+                    matchedItem = it
+                    break
+                }
+            }
+        }
+
+        guard let matched = matchedItem,
+              let watchId = matched["id"] as? String ?? matched["_id"] as? String else {
+            return []
+        }
+
+        // Fetch RSC payload from Next.js watch page
+        let watchType = isTV ? "episode" : "movie"
+        let watchUrlStr = "https://ctgmovies.com/watch/\(watchId)?type=\(watchType)"
+        guard let watchUrl = URL(string: watchUrlStr) else { return [] }
+
+        var watchReq = URLRequest(url: watchUrl)
+        watchReq.setValue("1", forHTTPHeaderField: "RSC")
+        watchReq.setValue("ctg_token=\(token)", forHTTPHeaderField: "Cookie")
+        watchReq.setValue(androidUA, forHTTPHeaderField: "User-Agent")
+        watchReq.setValue("https://ctgmovies.com/", forHTTPHeaderField: "Referer")
+        watchReq.timeoutInterval = 8
+
+        guard let (watchData, watchResp) = try? await URLSession.shared.data(for: watchReq),
+              (watchResp as? HTTPURLResponse)?.statusCode == 200,
+              let rscText = String(data: watchData, encoding: .utf8) else {
+            return []
+        }
+
+        // Extract direct streaming URLs from RSC payload
+        var streams: [StreamSource] = []
+        let pattern = #"https?://[^\s"'<>]+\.(?:mp4|mkv|m3u8)[^\s"'<>]*"#
+        if let regex = try? NSRegularExpression(pattern: pattern, options: .caseInsensitive) {
+            let matches = regex.matches(in: rscText, range: NSRange(rscText.startIndex..., in: rscText))
+            var seen = Set<String>()
+
+            for m in matches {
+                guard let r = Range(m.range, in: rscText) else { continue }
+                let link = String(rscText[r])
+                if seen.insert(link).inserted {
+                    let quality = link.contains("1080p") ? "1080P BluRay" : (link.contains("720p") ? "720P HD" : "BDIX Direct")
+                    streams.append(StreamSource(
+                        url: link,
+                        quality: quality,
+                        provider: "CTG Movies FTP (BDIX)",
+                        type: "direct",
+                        headers: [
+                            "User-Agent": androidUA,
+                            "Referer": "https://ctgmovies.com/",
+                            "Cookie": "ctg_token=\(token)"
+                        ]
+                    ))
+                }
+            }
+        }
+        return streams
+    }
+
+    // MARK: - 2. RoarZone EMBY / BDIX Server (Authentic Public API)
+    private func resolveRoarZone(title: String, isTV: Bool) async -> [StreamSource] {
+        let authUrlStr = "https://play.roarzone.net/Users/AuthenticateByName"
+        guard let authUrl = URL(string: authUrlStr) else { return [] }
+
+        var authReq = URLRequest(url: authUrl)
+        authReq.httpMethod = "POST"
+        authReq.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        authReq.setValue(defaultUA, forHTTPHeaderField: "User-Agent")
+        authReq.setValue("Eentertainment", forHTTPHeaderField: "X-Emby-Client")
+        authReq.setValue("iPhone", forHTTPHeaderField: "X-Emby-Device-Name")
+        authReq.setValue("a82c8593-c522-41b1-bda6-d752c415a875", forHTTPHeaderField: "X-Emby-Device-Id")
+        authReq.setValue("4.9.3.0", forHTTPHeaderField: "X-Emby-Client-Version")
+        authReq.timeoutInterval = 7
+        authReq.httpBody = try? JSONSerialization.data(withJSONObject: [
+            "Username": "RoarZone_Guest",
+            "Pw": ""
+        ])
+
+        guard let (authData, authResp) = try? await URLSession.shared.data(for: authReq),
+              (authResp as? HTTPURLResponse)?.statusCode == 200,
+              let authJson = try? JSONSerialization.jsonObject(with: authData) as? [String: Any],
+              let token = authJson["AccessToken"] as? String,
+              let userObj = authJson["User"] as? [String: Any],
+              let userId = userObj["Id"] as? String else {
+            return []
+        }
+
+        // Search library
+        guard let encodedTitle = title.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed),
+              let searchUrl = URL(string: "https://play.roarzone.net/Users/\(userId)/Items?SearchTerm=\(encodedTitle)&IncludeItemTypes=Movie,Series&Recursive=true&Limit=10") else {
+            return []
+        }
+
+        var searchReq = URLRequest(url: searchUrl)
+        searchReq.setValue(token, forHTTPHeaderField: "X-Emby-Token")
+        searchReq.setValue(defaultUA, forHTTPHeaderField: "User-Agent")
+        searchReq.timeoutInterval = 7
+
+        guard let (searchData, searchResp) = try? await URLSession.shared.data(for: searchReq),
+              (searchResp as? HTTPURLResponse)?.statusCode == 200,
+              let searchJson = try? JSONSerialization.jsonObject(with: searchData) as? [String: Any],
+              let items = searchJson["Items"] as? [[String: Any]], !items.isEmpty else {
+            return []
+        }
+
+        var streams: [StreamSource] = []
+        for item in items.prefix(2) {
+            guard let itemId = item["Id"] as? String ?? (item["Id"] as? Int).map(String.init) else { continue }
+            let name = item["Name"] as? String ?? title
+            let masterUrl = "https://play.roarzone.net/videos/\(itemId)/master.m3u8?api_key=\(token)&VideoCodec=hevc,h264&AudioCodec=aac,mp3"
+            streams.append(StreamSource(
+                url: masterUrl,
+                quality: "HD 1080P",
+                provider: "RoarZone [Emby] (\(name))",
                 type: "direct",
-                headers: ["User-Agent": userAgent, "Referer": "http://movie.ctgmovies.com/"]
+                headers: [
+                    "User-Agent": defaultUA,
+                    "Referer": "https://play.roarzone.net/web/index.html"
+                ]
+            ))
+        }
+        return streams
+    }
+
+    // MARK: - 3. VixSrc HD Stream Resolver
+    private func resolveVixSrc(tmdbId: Int, isTV: Bool, season: Int, episode: Int) async -> [StreamSource] {
+        let path = isTV ? "api/tv/\(tmdbId)/\(season)/\(episode)" : "api/movie/\(tmdbId)"
+        guard let url = URL(string: "https://vixsrc.to/\(path)") else { return [] }
+
+        var req = URLRequest(url: url)
+        req.setValue(defaultUA, forHTTPHeaderField: "User-Agent")
+        req.setValue("application/json", forHTTPHeaderField: "Accept")
+        req.timeoutInterval = 7
+
+        guard let (data, resp) = try? await URLSession.shared.data(for: req),
+              (resp as? HTTPURLResponse)?.statusCode == 200,
+              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let src = json["src"] as? String, !src.isEmpty else {
+            return []
+        }
+
+        let fullEmbedUrl = src.hasPrefix("http") ? src : "https://vixsrc.to\(src)"
+        return [
+            StreamSource(
+                url: fullEmbedUrl,
+                quality: "1080P Full HD",
+                provider: "VixSrc HD",
+                type: "embed",
+                headers: [
+                    "User-Agent": defaultUA,
+                    "Referer": "https://vixsrc.to/"
+                ]
             )
-        }
-        return nil
-    }
-
-    // MARK: - RoarZone EMBY / BDIX FTP
-    private func resolveRoarZone(title: String, isTV: Bool, season: Int, episode: Int) async -> StreamSource? {
-        let clean = title.replacingOccurrences(of: " ", with: "%20")
-        let roarUrl = "http://172.16.50.4/Movies/\(clean)/\(clean).mkv"
-        return StreamSource(
-            url: roarUrl,
-            quality: "1080P BDIX",
-            provider: "RoarZone FTP (BDIX)",
-            type: "direct",
-            headers: ["User-Agent": userAgent]
-        )
-    }
-
-    // MARK: - 11Plus WEB
-    private func resolve11Plus(title: String, isTV: Bool, season: Int, episode: Int) async -> StreamSource? {
-        let clean = title.replacingOccurrences(of: " ", with: "-").lowercased()
-        let elevenUrl = "http://11plus.live/stream/\(clean).mp4"
-        return StreamSource(
-            url: elevenUrl,
-            quality: "720P BDIX",
-            provider: "11Plus WEB (BDIX)",
-            type: "direct",
-            headers: ["User-Agent": userAgent, "Referer": "http://11plus.live/"]
-        )
-    }
-
-    // MARK: - Net Mirror
-    private func resolveNetMirror(title: String, tmdbId: Int, isTV: Bool, season: Int, episode: Int) -> StreamSource {
-        let path = isTV ? "tv/\(tmdbId)/\(season)/\(episode)" : "movie/\(tmdbId)"
-        return StreamSource(
-            url: "https://netmirror.app/\(path)",
-            quality: "1080P VIP",
-            provider: "Net Mirror",
-            type: "embed"
-        )
-    }
-
-    // MARK: - Global Multi-Embeds
-    private func resolveGlobalEmbeds(tmdbId: Int, isTV: Bool, season: Int, episode: Int) -> [StreamSource] {
-        if isTV {
-            return [
-                StreamSource(
-                    url: "https://vidsrc.me/embed/tv?tmdb=\(tmdbId)&season=\(season)&episode=\(episode)",
-                    quality: "1080P Full HD",
-                    provider: "VidSrc HD",
-                    type: "embed"
-                ),
-                StreamSource(
-                    url: "https://multiembed.mov/?video_id=\(tmdbId)&tmdb=1&s=\(season)&e=\(episode)",
-                    quality: "Multi-Server VIP",
-                    provider: "MultiEmbed",
-                    type: "embed"
-                ),
-                StreamSource(
-                    url: "https://superembed.stream/?video_id=\(tmdbId)&tmdb=1&s=\(season)&e=\(episode)",
-                    quality: "Auto 4K/1080P",
-                    provider: "SuperEmbed",
-                    type: "embed"
-                ),
-                StreamSource(
-                    url: "https://www.2embed.cc/embedtv/\(tmdbId)&s=\(season)&e=\(episode)",
-                    quality: "HD Fast",
-                    provider: "2Embed",
-                    type: "embed"
-                )
-            ]
-        } else {
-            return [
-                StreamSource(
-                    url: "https://vidsrc.me/embed/movie?tmdb=\(tmdbId)",
-                    quality: "1080P Full HD",
-                    provider: "VidSrc HD",
-                    type: "embed"
-                ),
-                StreamSource(
-                    url: "https://multiembed.mov/?video_id=\(tmdbId)&tmdb=1",
-                    quality: "Multi-Server VIP",
-                    provider: "MultiEmbed",
-                    type: "embed"
-                ),
-                StreamSource(
-                    url: "https://superembed.stream/?video_id=\(tmdbId)&tmdb=1",
-                    quality: "Auto 4K/1080P",
-                    provider: "SuperEmbed",
-                    type: "embed"
-                ),
-                StreamSource(
-                    url: "https://www.2embed.cc/embed/\(tmdbId)",
-                    quality: "HD Fast",
-                    provider: "2Embed",
-                    type: "embed"
-                )
-            ]
-        }
-    }
-
-    private func extractFirstMatch(_ text: String, pattern: String) -> String? {
-        guard let regex = try? NSRegularExpression(pattern: pattern, options: [.caseInsensitive]),
-              let match = regex.firstMatch(in: text, range: NSRange(text.startIndex..., in: text)),
-              match.numberOfRanges > 1,
-              let range = Range(match.range(at: 1), in: text) else {
-            return nil
-        }
-        return String(text[range])
+        ]
     }
 }
