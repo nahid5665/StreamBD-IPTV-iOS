@@ -139,9 +139,9 @@ final class JSRunner {
                   let r2 = Range(m.range(at: 2), in: html) else { continue }
             let aAttrs = String(html[r1])
             let imgAttrs = String(html[r2])
-            guard let title = extractAttr(aAttrs, #"href="#([^"]+)""#),
-                  let dataName = extractAttr(aAttrs, #"data-name="([^"]+)""#),
-                  let rawImg = extractAttr(imgAttrs, #"src="([^"]+)""#) else { continue }
+            guard let title = extractAttr(aAttrs, "href=\"#([^\"]+)\""),
+                  let dataName = extractAttr(aAttrs, "data-name=\"([^\"]+)\""),
+                  let rawImg = extractAttr(imgAttrs, "src=\"([^\"]+)\"") else { continue }
             let imgUrl = rawImg.hasPrefix("http") ? rawImg : "\(baseUrl)/\(rawImg)"
             let streamUrl = "https://backend.plusbox.tv/\(dataName)/tracks-v1/index.fmp4.m3u8"
             let embedUrl = "https://backend.plusbox.tv/\(dataName)/embed.html?mute=false&autoplay=true&volume=50"
