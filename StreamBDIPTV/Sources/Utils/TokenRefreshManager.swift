@@ -9,8 +9,9 @@ final class TokenRefreshManager: ObservableObject {
     @Published var isRefreshing: Bool = false
     @Published var tokenStatus: String = "Ready"
 
-    // Active tokens cache: key -> token/cookie string
+    // Active tokens cache
     private var activeTokens: [String: String] = [:]
+    private var plusBoxChannelTokens: [String: (token: String, timestamp: Date)] = [:]
     private var timerCancellable: AnyCancellable?
 
     private init() {
@@ -20,7 +21,6 @@ final class TokenRefreshManager: ObservableObject {
     /// Starts a periodic 2-hour (7200 seconds) refresh loop
     func startScheduledRefreshTimer() {
         timerCancellable?.cancel()
-        // Refresh every 2 hours (7200 seconds)
         timerCancellable = Timer.publish(every: 7200, on: .main, in: .common)
             .autoconnect()
             .sink { [weak self] _ in
@@ -39,20 +39,46 @@ final class TokenRefreshManager: ObservableObject {
         // 1. Refresh Jio TV Session Tokens (S1 & S2)
         await refreshJioSessionToken()
 
-        // 2. Refresh PlusBox Token
-        await refreshPlusBoxToken()
+        // 2. Clear old cached PlusBox channel tokens so fresh ones are requested on next play
+        plusBoxChannelTokens.removeAll()
 
         // 3. Refresh Oxoo Portal Tokens
         refreshOxooPortalTokens()
 
         lastRefreshTime = Date()
         isRefreshing = false
-        tokenStatus = "Tokens Active (Updated: \(DateFormatter.localizedString(from: Date(), dateStyle: .none, timeStyle: .short)))"
+        tokenStatus = "Tokens Active (\(DateFormatter.localizedString(from: Date(), dateStyle: .none, timeStyle: .short)))"
     }
 
-    /// Returns the latest active token for a provider
-    func getToken(for provider: String) -> String? {
-        return activeTokens[provider]
+    /// Dynamically fetches a fresh token for a specific PlusBox channel on demand
+    func fetchPlusBoxToken(for channelName: String) async -> String {
+        // Return cached token if less than 90 minutes old
+        if let cached = plusBoxChannelTokens[channelName],
+           Date().timeIntervalSince(cached.timestamp) < 5400 {
+            return cached.token
+        }
+
+        guard let url = URL(string: "https://plusbox.tv/token.php") else { return "" }
+        var req = URLRequest(url: url)
+        req.httpMethod = "POST"
+        req.setValue("application/x-www-form-urlencoded; charset=UTF-8", forHTTPHeaderField: "Content-Type")
+        req.setValue("XMLHttpRequest", forHTTPHeaderField: "X-Requested-With")
+        req.setValue("Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.0.0 Mobile Safari/537.36", forHTTPHeaderField: "User-Agent")
+        req.setValue("https://plusbox.tv/", forHTTPHeaderField: "Referer")
+        req.setValue("https://plusbox.tv", forHTTPHeaderField: "Origin")
+        req.httpBody = "ch_name=\(channelName)".data(using: .utf8)
+        req.timeoutInterval = 5
+
+        if let (data, resp) = try? await URLSession.shared.data(for: req),
+           let httpResp = resp as? HTTPURLResponse, httpResp.statusCode == 200,
+           let tokenStr = String(data: data, encoding: .utf8) {
+            let cleanToken = tokenStr.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !cleanToken.isEmpty && !cleanToken.contains("<html") {
+                plusBoxChannelTokens[channelName] = (token: cleanToken, timestamp: Date())
+                return cleanToken
+            }
+        }
+        return ""
     }
 
     /// Injects fresh tokens and headers into a stream URL before playback
@@ -67,24 +93,6 @@ final class TokenRefreshManager: ObservableObject {
                 headers["Referer"] = "https://jp.ipl2026.workers.dev/"
                 headers["Origin"] = "https://jp.ipl2026.workers.dev"
             }
-        }
-
-        // PlusBox Token Replacement
-        if rawUrl.contains("plusbox.tv") || channel.group.localizedCaseInsensitiveContains("PlusBox") {
-            if let token = activeTokens["plusbox"] {
-                if finalUrl.contains("token=") {
-                    // Replace existing expired token parameter with fresh one
-                    let regex = try? NSRegularExpression(pattern: #"token=[^&|]+"#)
-                    finalUrl = regex?.stringByReplacingMatches(
-                        in: finalUrl,
-                        range: NSRange(finalUrl.startIndex..., in: finalUrl),
-                        withTemplate: "token=\(token)"
-                    ) ?? finalUrl
-                }
-            }
-            headers["User-Agent"] = "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36"
-            headers["Referer"] = "https://backend.plusbox.tv/"
-            headers["Origin"] = "https://plusbox.tv"
         }
 
         // Toffee headers
@@ -103,7 +111,7 @@ final class TokenRefreshManager: ObservableObject {
         var req = URLRequest(url: url)
         req.setValue("https://jp.ipl2026.workers.dev", forHTTPHeaderField: "Origin")
         req.setValue("https://jp.ipl2026.workers.dev/", forHTTPHeaderField: "Referer")
-        req.timeoutInterval = 8
+        req.timeoutInterval = 7
 
         if let (data, _) = try? await URLSession.shared.data(for: req),
            let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
@@ -112,29 +120,7 @@ final class TokenRefreshManager: ObservableObject {
         }
     }
 
-    private func refreshPlusBoxToken() async {
-        guard let url = URL(string: "https://plusbox.tv/token.php") else { return }
-        var req = URLRequest(url: url)
-        req.httpMethod = "POST"
-        req.setValue("application/x-www-form-urlencoded; charset=UTF-8", forHTTPHeaderField: "Content-Type")
-        req.setValue("XMLHttpRequest", forHTTPHeaderField: "X-Requested-With")
-        req.setValue("https://plusbox.tv/", forHTTPHeaderField: "Referer")
-        req.setValue("https://plusbox.tv", forHTTPHeaderField: "Origin")
-        req.httpBody = "ch_name=somoy_tv".data(using: .utf8)
-        req.timeoutInterval = 8
-
-        if let (data, resp) = try? await URLSession.shared.data(for: req),
-           let httpResp = resp as? HTTPURLResponse, httpResp.statusCode == 200,
-           let tokenStr = String(data: data, encoding: .utf8) {
-            let cleanToken = tokenStr.trimmingCharacters(in: .whitespacesAndNewlines)
-            if !cleanToken.isEmpty {
-                activeTokens["plusbox"] = cleanToken
-            }
-        }
-    }
-
     private func refreshOxooPortalTokens() {
-        // Standard Oxoo base64 token
         activeTokens["oxoo_default"] = "Basic YWRtaW46MTIzNA=="
     }
 }
