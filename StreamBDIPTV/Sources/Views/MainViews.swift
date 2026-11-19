@@ -11,17 +11,29 @@ struct LiquidGlassModifier: ViewModifier {
     func body(content: Content) -> some View {
         content
             .background(
-                RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-                    .fill(.ultraThinMaterial.opacity(opacity))
+                ZStack {
+                    RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                        .fill(.ultraThinMaterial.opacity(opacity))
+                    // Ambient inner glow layer
+                    RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                        .fill(
+                            LinearGradient(
+                                colors: [Color.white.opacity(0.07), Color.clear],
+                                startPoint: .topLeading,
+                                endPoint: .bottomTrailing
+                            )
+                        )
+                }
             )
             .overlay(
                 RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
                     .stroke(
                         LinearGradient(
                             colors: [
-                                Color.white.opacity(0.35),
-                                Color.white.opacity(0.08),
-                                Color.clear
+                                Color.white.opacity(0.45),
+                                Color.white.opacity(0.12),
+                                Color.clear,
+                                Color.white.opacity(0.06)
                             ],
                             startPoint: .topLeading,
                             endPoint: .bottomTrailing
@@ -29,13 +41,46 @@ struct LiquidGlassModifier: ViewModifier {
                         lineWidth: 1
                     )
             )
-            .shadow(color: Color.black.opacity(0.4), radius: 10, x: 0, y: 6)
+            .shadow(color: Color.black.opacity(0.45), radius: 12, x: 0, y: 6)
+            .shadow(color: Color.purple.opacity(0.08), radius: 20, x: 0, y: 0)
     }
 }
 
 extension View {
     func liquidGlass(cornerRadius: CGFloat = 16, opacity: Double = 0.65) -> some View {
         self.modifier(LiquidGlassModifier(cornerRadius: cornerRadius, opacity: opacity))
+    }
+}
+
+// MARK: - Spring Scale Button Style (Apple Tactile Press)
+
+struct ScaleButtonStyle: ButtonStyle {
+    var scale: CGFloat = 0.95
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .scaleEffect(configuration.isPressed ? scale : 1.0)
+            .animation(.interactiveSpring(response: 0.28, dampingFraction: 0.7, blendDuration: 0), value: configuration.isPressed)
+    }
+}
+
+// MARK: - Ambient Glow Modifier
+
+struct AmbientGlowModifier: ViewModifier {
+    var color: Color
+    var radius: CGFloat = 30
+    func body(content: Content) -> some View {
+        content
+            .background(
+                color.opacity(0.25)
+                    .blur(radius: radius)
+                    .offset(y: 8)
+            )
+    }
+}
+
+extension View {
+    func ambientGlow(_ color: Color, radius: CGFloat = 30) -> some View {
+        self.modifier(AmbientGlowModifier(color: color, radius: radius))
     }
 }
 
@@ -62,7 +107,7 @@ struct WebStreamPlayerView: UIViewRepresentable {
     func updateUIView(_ uiView: WKWebView, context: Context) {}
 }
 
-// MARK: - Netflix Main Container
+// MARK: - Eentertainment Main Container
 
 struct ContentView: View {
     @StateObject private var mainViewModel = MainViewModel()
@@ -103,39 +148,47 @@ struct ContentView: View {
     }
 
     private var floatingGlassTabBar: some View {
-        HStack(spacing: 24) {
+        HStack(spacing: 0) {
             tabButton(title: "Home", icon: "house.fill", tabIndex: 0)
             tabButton(title: "Live TV", icon: "tv.fill", tabIndex: 1)
             tabButton(title: "Sports", icon: "sportscourt.fill", tabIndex: 2)
             tabButton(title: "Search", icon: "magnifyingglass", tabIndex: 3)
         }
-        .padding(.horizontal, 22)
-        .padding(.vertical, 12)
-        .liquidGlass(cornerRadius: 32, opacity: 0.85)
-        .padding(.horizontal, 24)
+        .padding(.horizontal, 10)
+        .padding(.vertical, 10)
+        .liquidGlass(cornerRadius: 32, opacity: 0.88)
+        .padding(.horizontal, 20)
         .padding(.bottom, 8)
     }
 
     private func tabButton(title: String, icon: String, tabIndex: Int) -> some View {
         Button {
-            withAnimation(.spring(response: 0.35, dampingFraction: 0.75)) {
+            withAnimation(.interactiveSpring(response: 0.3, dampingFraction: 0.72)) {
                 selectedTab = tabIndex
             }
         } label: {
             VStack(spacing: 4) {
                 Image(systemName: icon)
-                    .font(.system(size: 19, weight: selectedTab == tabIndex ? .bold : .regular))
-                    .foregroundStyle(selectedTab == tabIndex ? Color.red : Color.gray)
+                    .font(.system(size: 20, weight: selectedTab == tabIndex ? .bold : .regular))
+                    .foregroundStyle(
+                        selectedTab == tabIndex
+                            ? LinearGradient(colors: [Color(red: 0.4, green: 0.6, blue: 1.0), Color(red: 0.6, green: 0.3, blue: 1.0)], startPoint: .topLeading, endPoint: .bottomTrailing)
+                            : LinearGradient(colors: [Color.gray], startPoint: .top, endPoint: .bottom)
+                    )
+                    .scaleEffect(selectedTab == tabIndex ? 1.12 : 1.0)
+                    .animation(.spring(response: 0.3, dampingFraction: 0.65), value: selectedTab)
                 Text(title)
                     .font(.system(size: 10, weight: selectedTab == tabIndex ? .bold : .medium))
                     .foregroundStyle(selectedTab == tabIndex ? Color.white : Color.gray)
             }
             .frame(maxWidth: .infinity)
+            .padding(.vertical, 4)
         }
+        .buttonStyle(ScaleButtonStyle(scale: 0.92))
     }
 }
 
-// MARK: - Netflix Home View
+// MARK: - Eentertainment Home View
 
 struct NetflixHomeView: View {
     @ObservedObject var vodVM: VODViewModel
@@ -145,7 +198,7 @@ struct NetflixHomeView: View {
         NavigationStack {
             ScrollView(showsIndicators: false) {
                 VStack(spacing: 22) {
-                    // Netflix Spotlight Hero
+                    // Hero Spotlight
                     if let featured = vodVM.featuredMedia {
                         NetflixHeroBanner(media: featured, vodVM: vodVM)
                     }
@@ -170,7 +223,7 @@ struct NetflixHomeView: View {
                         NetflixMediaRow(title: "Bengali Blockbusters & BDIX", items: vodVM.banglaMovies, vodVM: vodVM)
                     }
 
-                    // Quick Playlists Bar (Toffee, Akash, PlusBox, Jio)
+                    // Quick Playlists Bar
                     quickPlaylistsRow
 
                     // Bollywood Hits
@@ -183,7 +236,7 @@ struct NetflixHomeView: View {
             }
             .background(Color.black.ignoresSafeArea())
             .safeAreaInset(edge: .top) {
-                netflixTopHeader
+                eentertainmentTopHeader
             }
             .sheet(item: $vodVM.selectedMedia) { media in
                 NetflixMediaDetailSheet(media: media, vodVM: vodVM)
@@ -194,25 +247,41 @@ struct NetflixHomeView: View {
         }
     }
 
-    private var netflixTopHeader: some View {
+    private var eentertainmentTopHeader: some View {
         HStack {
-            // Netflix Red Logo
-            Text("NETFLIX")
-                .font(.system(size: 22, weight: .black, design: .rounded))
-                .tracking(2)
-                .foregroundStyle(
-                    LinearGradient(
-                        colors: [Color.red, Color(red: 0.7, green: 0, blue: 0)],
-                        startPoint: .top,
-                        endPoint: .bottom
+            // Eentertainment Logo — Liquid Glass gradient badge
+            ZStack {
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .fill(
+                        LinearGradient(
+                            colors: [
+                                Color(red: 0.35, green: 0.55, blue: 1.0),
+                                Color(red: 0.55, green: 0.25, blue: 0.95)
+                            ],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        )
                     )
-                )
+                    .frame(height: 34)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 10, style: .continuous)
+                            .stroke(Color.white.opacity(0.3), lineWidth: 1)
+                    )
+                    .shadow(color: Color.purple.opacity(0.5), radius: 14, x: 0, y: 4)
+
+                Text("Eentertainment")
+                    .font(.system(size: 17, weight: .black, design: .rounded))
+                    .tracking(0.5)
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 14)
+            }
 
             Spacer()
 
             HStack(spacing: 8) {
                 Circle().fill(Color.green).frame(width: 7, height: 7)
-                Text("VLC Engine Active")
+                    .shadow(color: .green, radius: 4)
+                Text("VLC Active")
                     .font(.caption2.bold())
                     .foregroundStyle(.green)
             }
@@ -224,7 +293,7 @@ struct NetflixHomeView: View {
         .padding(.vertical, 10)
         .background(
             LinearGradient(
-                colors: [Color.black.opacity(0.85), Color.clear],
+                colors: [Color.black.opacity(0.9), Color.clear],
                 startPoint: .top,
                 endPoint: .bottom
             )
@@ -237,7 +306,9 @@ struct NetflixHomeView: View {
             HStack {
                 Text("Featured IPTV Playlists").font(.title3.bold()).foregroundStyle(.white)
                 Spacer()
-                Text("44 Playlists").font(.caption.bold()).foregroundStyle(.red)
+                Text("44 Playlists")
+                    .font(.caption.bold())
+                    .foregroundStyle(Color(red: 0.4, green: 0.6, blue: 1.0))
             }
             .padding(.horizontal, 16)
 
@@ -250,7 +321,13 @@ struct NetflixHomeView: View {
                             VStack(spacing: 6) {
                                 Image(systemName: "play.tv.fill")
                                     .font(.title2)
-                                    .foregroundStyle(.red)
+                                    .foregroundStyle(
+                                        LinearGradient(
+                                            colors: [Color(red: 0.4, green: 0.6, blue: 1.0), Color(red: 0.6, green: 0.3, blue: 1.0)],
+                                            startPoint: .topLeading,
+                                            endPoint: .bottomTrailing
+                                        )
+                                    )
 
                                 Text(pl.name)
                                     .font(.caption.bold())
@@ -265,7 +342,7 @@ struct NetflixHomeView: View {
                             .padding(8)
                             .liquidGlass(cornerRadius: 14, opacity: 0.4)
                         }
-                        .buttonStyle(.plain)
+                        .buttonStyle(ScaleButtonStyle())
                     }
                 }
                 .padding(.horizontal, 16)
@@ -277,7 +354,7 @@ struct NetflixHomeView: View {
     }
 }
 
-// MARK: - Netflix Hero Banner
+// MARK: - Eentertainment Hero Banner
 
 struct NetflixHeroBanner: View {
     let media: TmdbMedia
@@ -315,7 +392,7 @@ struct NetflixHeroBanner: View {
                     .padding(.horizontal, 20)
 
                 HStack(spacing: 8) {
-                    Text("BDIX Fast").font(.caption.bold()).foregroundStyle(.red)
+                    Text("BDIX Fast").font(.caption.bold()).foregroundStyle(Color(red: 0.4, green: 0.6, blue: 1.0))
                     Text("•").foregroundStyle(.gray)
                     Text(media.isMovie ? "Movie" : "Series").font(.caption.weight(.medium))
                     Text("•").foregroundStyle(.gray)
@@ -335,8 +412,9 @@ struct NetflixHeroBanner: View {
                         .padding(.horizontal, 28)
                         .padding(.vertical, 11)
                         .background(Color.white)
-                        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
                     }
+                    .buttonStyle(ScaleButtonStyle())
 
                     Button {
                         vodVM.selectedMedia = media
@@ -348,8 +426,9 @@ struct NetflixHeroBanner: View {
                         .foregroundStyle(.white)
                         .padding(.horizontal, 22)
                         .padding(.vertical, 11)
-                        .liquidGlass(cornerRadius: 8, opacity: 0.6)
+                        .liquidGlass(cornerRadius: 10, opacity: 0.6)
                     }
+                    .buttonStyle(ScaleButtonStyle())
                 }
                 .padding(.top, 4)
             }
@@ -359,7 +438,7 @@ struct NetflixHeroBanner: View {
     }
 }
 
-// MARK: - Netflix Top 10 Row
+// MARK: - Eentertainment Top 10 Row
 
 struct NetflixTop10Row: View {
     let title: String
@@ -418,7 +497,7 @@ struct NetflixTop10Row: View {
     }
 }
 
-// MARK: - Netflix Media Row
+// MARK: - Eentertainment Media Row
 
 struct NetflixMediaRow: View {
     let title: String
@@ -467,7 +546,7 @@ struct NetflixMediaRow: View {
     }
 }
 
-// MARK: - Live TV Netflix View (ALL 44 PLAYLISTS BROWSER)
+// MARK: - Live TV View (ALL 44 PLAYLISTS BROWSER)
 
 struct LiveTVNetflixView: View {
     @ObservedObject var viewModel: MainViewModel
@@ -483,7 +562,10 @@ struct LiveTVNetflixView: View {
                 // Token Refresh & Live Status Bar
                 HStack {
                     HStack(spacing: 6) {
-                        Circle().fill(Color.green).frame(width: 8, height: 8)
+                        Circle()
+                            .fill(Color.green)
+                            .frame(width: 8, height: 8)
+                            .shadow(color: .green, radius: 4)
                         Text(tokenManager.tokenStatus)
                             .font(.system(size: 11, weight: .semibold))
                             .foregroundStyle(.white)
@@ -502,11 +584,12 @@ struct LiveTVNetflixView: View {
                             Text("Refresh")
                                 .font(.caption.bold())
                         }
-                        .foregroundStyle(.red)
+                        .foregroundStyle(Color(red: 0.4, green: 0.6, blue: 1.0))
                         .padding(.horizontal, 10)
                         .padding(.vertical, 4)
                         .liquidGlass(cornerRadius: 8, opacity: 0.3)
                     }
+                    .buttonStyle(ScaleButtonStyle())
                 }
                 .padding(.horizontal, 16)
                 .padding(.vertical, 8)
@@ -517,16 +600,24 @@ struct LiveTVNetflixView: View {
                     HStack(spacing: 8) {
                         ForEach(viewModel.playlistCategories, id: \.self) { cat in
                             Button {
-                                viewModel.selectedCategory = cat
+                                withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
+                                    viewModel.selectedCategory = cat
+                                }
                             } label: {
                                 Text(cat)
                                     .font(.subheadline.bold())
                                     .padding(.horizontal, 14)
                                     .padding(.vertical, 7)
-                                    .background(viewModel.selectedCategory == cat ? Color.red : Color.white.opacity(0.12))
+                                    .background(
+                                        viewModel.selectedCategory == cat
+                                            ? LinearGradient(colors: [Color(red: 0.35, green: 0.55, blue: 1.0), Color(red: 0.55, green: 0.25, blue: 0.95)], startPoint: .leading, endPoint: .trailing)
+                                            : LinearGradient(colors: [Color.white.opacity(0.12)], startPoint: .leading, endPoint: .trailing)
+                                    )
                                     .foregroundStyle(.white)
                                     .clipShape(Capsule())
+                                    .shadow(color: viewModel.selectedCategory == cat ? Color.purple.opacity(0.4) : .clear, radius: 8, x: 0, y: 3)
                             }
+                            .buttonStyle(ScaleButtonStyle(scale: 0.94))
                         }
                     }
                     .padding(.horizontal)
@@ -547,14 +638,14 @@ struct LiveTVNetflixView: View {
                                                 if let img = p.image {
                                                     img.resizable().scaledToFit()
                                                 } else {
-                                                    Image(systemName: "play.tv.fill").foregroundStyle(.red)
+                                                    Image(systemName: "play.tv.fill").foregroundStyle(categoryColor(for: playlist.category))
                                                 }
                                             }
                                             .frame(width: 32, height: 32)
                                         } else {
                                             Image(systemName: "tv.fill")
                                                 .font(.title3)
-                                                .foregroundStyle(.red)
+                                                .foregroundStyle(categoryColor(for: playlist.category))
                                                 .frame(width: 32, height: 32)
                                         }
 
@@ -581,19 +672,19 @@ struct LiveTVNetflixView: View {
                                     }
 
                                     HStack {
-                                        Text("StreamBD")
+                                        Text("Eentertainment")
                                             .font(.system(size: 10, weight: .medium))
                                             .foregroundStyle(.secondary)
                                         Spacer()
                                         Image(systemName: "chevron.right")
                                             .font(.caption.bold())
-                                            .foregroundStyle(.red)
+                                            .foregroundStyle(categoryColor(for: playlist.category))
                                     }
                                 }
                                 .padding(14)
                                 .liquidGlass(cornerRadius: 14, opacity: 0.35)
                             }
-                            .buttonStyle(.plain)
+                            .buttonStyle(ScaleButtonStyle(scale: 0.96))
                         }
                     }
                     .padding()
@@ -614,12 +705,14 @@ struct LiveTVNetflixView: View {
 
     private func categoryColor(for cat: String) -> Color {
         switch cat {
-        case "Bangla TV": return .green
-        case "Sports": return .red
-        case "BDIX FTP": return .blue
-        case "Indian TV": return .purple
-        case "Bangla OTT": return .orange
-        default: return .yellow
+        case "Bangla TV": return Color(red: 0.2, green: 0.8, blue: 0.5)
+        case "Sports": return Color(red: 1.0, green: 0.35, blue: 0.35)
+        case "BDIX FTP": return Color(red: 0.4, green: 0.6, blue: 1.0)
+        case "Indian TV": return Color(red: 0.75, green: 0.4, blue: 1.0)
+        case "Bangla OTT": return Color(red: 1.0, green: 0.6, blue: 0.2)
+        case "StreamBD Official": return Color(red: 0.4, green: 0.6, blue: 1.0)
+        case "BDIX Portal": return Color(red: 0.3, green: 0.9, blue: 0.9)
+        default: return Color(red: 1.0, green: 0.85, blue: 0.3)
         }
     }
 }
@@ -721,7 +814,7 @@ struct PlaylistChannelListView: View {
     }
 }
 
-// MARK: - Netflix Media Detail Sheet (Stream Player with Addon Scrapers)
+// MARK: - Eentertainment Media Detail Sheet (Stream Player with Addon Scrapers)
 
 struct NetflixMediaDetailSheet: View {
     let media: TmdbMedia
@@ -788,10 +881,18 @@ struct NetflixMediaDetailSheet: View {
                         }
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 14)
-                        .background(Color.white)
-                        .foregroundStyle(.black)
-                        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                        .background(
+                            LinearGradient(
+                                colors: [Color(red: 0.35, green: 0.55, blue: 1.0), Color(red: 0.55, green: 0.25, blue: 0.95)],
+                                startPoint: .leading,
+                                endPoint: .trailing
+                            )
+                        )
+                        .foregroundStyle(.white)
+                        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                        .shadow(color: Color.purple.opacity(0.5), radius: 10, x: 0, y: 4)
                     }
+                    .buttonStyle(ScaleButtonStyle())
                     .padding(.horizontal, 16)
 
                     // Synopsis Overview
@@ -810,14 +911,14 @@ struct NetflixMediaDetailSheet: View {
 
                     // Stream Providers & Addon Names
                     VStack(alignment: .leading, spacing: 10) {
-                        Text("Stream Providers & Addons (StreamBD VOD)")
+                        Text("Stream Providers & Addons (Eentertainment VOD)")
                             .font(.headline)
                             .foregroundStyle(.white)
                             .padding(.horizontal, 16)
 
                         if isLoadingStreams {
                             HStack(spacing: 10) {
-                                ProgressView().tint(.red)
+                                ProgressView().tint(Color(red: 0.4, green: 0.6, blue: 1.0))
                                 Text("Resolving CTG Movies, Cineplex, RoarZone & Addons…")
                                     .font(.caption)
                                     .foregroundStyle(.gray)
@@ -834,7 +935,7 @@ struct NetflixMediaDetailSheet: View {
                                     } label: {
                                         HStack {
                                             Image(systemName: source.type == "direct" ? "bolt.fill" : "globe")
-                                                .foregroundStyle(source.type == "direct" ? .green : .orange)
+                                                .foregroundStyle(source.type == "direct" ? Color(red: 0.2, green: 0.9, blue: 0.5) : Color(red: 1.0, green: 0.6, blue: 0.2))
 
                                             VStack(alignment: .leading, spacing: 2) {
                                                 Text(source.provider ?? "Server")
@@ -849,17 +950,26 @@ struct NetflixMediaDetailSheet: View {
 
                                             Text(source.type == "direct" ? "Direct VLC" : "Web Embed")
                                                 .font(.system(size: 10, weight: .bold))
-                                                .foregroundStyle(source.type == "direct" ? .green : .orange)
+                                                .foregroundStyle(source.type == "direct" ? Color(red: 0.2, green: 0.9, blue: 0.5) : Color(red: 1.0, green: 0.6, blue: 0.2))
                                                 .padding(.horizontal, 8)
                                                 .padding(.vertical, 4)
                                                 .background(Color.white.opacity(0.08))
                                                 .clipShape(Capsule())
 
-                                            Image(systemName: "play.circle.fill").font(.title3).foregroundStyle(.red)
+                                            Image(systemName: "play.circle.fill")
+                                                .font(.title3)
+                                                .foregroundStyle(
+                                                    LinearGradient(
+                                                        colors: [Color(red: 0.4, green: 0.6, blue: 1.0), Color(red: 0.6, green: 0.3, blue: 1.0)],
+                                                        startPoint: .topLeading,
+                                                        endPoint: .bottomTrailing
+                                                    )
+                                                )
                                         }
                                         .padding(12)
                                         .liquidGlass(cornerRadius: 10, opacity: 0.35)
                                     }
+                                    .buttonStyle(ScaleButtonStyle(scale: 0.97))
                                 }
                             }
                             .padding(.horizontal, 16)
@@ -1106,7 +1216,7 @@ struct EventsNetflixView: View {
     }
 }
 
-// MARK: - Search View
+// MARK: - Eentertainment Search View
 
 struct NetflixSearchView: View {
     @ObservedObject var vodVM: VODViewModel
@@ -1187,7 +1297,7 @@ struct NetflixSearchView: View {
 // MARK: - App Entry Point
 
 @main
-struct StreamBDIPTVApp: App {
+struct EentertainmentApp: App {
     var body: some Scene {
         WindowGroup {
             ContentView()
