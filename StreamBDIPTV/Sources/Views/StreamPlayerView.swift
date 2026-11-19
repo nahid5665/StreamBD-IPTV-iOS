@@ -53,14 +53,14 @@ struct VLCPlayerView: UIViewRepresentable {
             super.init()
         }
 
-        func mediaPlayerStateChanged(_ aNotification: Notification!) {
+        func mediaPlayerStateChanged(_ aNotification: Notification) {
             guard let p = aNotification.object as? VLCMediaPlayer else { return }
             DispatchQueue.main.async {
                 self.parent.onStateChanged?(p.state)
             }
         }
 
-        func mediaPlayerTimeChanged(_ aNotification: Notification!) {
+        func mediaPlayerTimeChanged(_ aNotification: Notification) {
             guard let p = aNotification.object as? VLCMediaPlayer else { return }
             DispatchQueue.main.async {
                 self.parent.onTimeChanged?(p.time, p.media?.length ?? VLCTime.null())
@@ -179,8 +179,8 @@ struct UniversalFullScreenPlayerView: View {
                 },
                 onTimeChanged: { curr, total in
                     guard !isScrubbing else { return }
-                    currentTimeText = curr.stringValue ?? "00:00"
-                    totalTimeText = total.stringValue ?? "00:00"
+                    currentTimeText = curr.stringValue
+                    totalTimeText = total.stringValue
                     if let p = vlcPlayer {
                         progressValue = Double(p.position)
                     }
@@ -626,15 +626,18 @@ struct StreamPlayerSheet: View {
 
     private func playSource(rawLine: String) {
         let parsed = M3UParser.parseUrlHeaders(rawLine)
-        let resolved = TokenRefreshManager.shared.applyLiveToken(to: parsed.cleanUrl, channel: channel)
-
-        currentRawUrl = resolved.url
-        var headers = resolved.headers
-        for (k, v) in parsed.headers { headers[k] = v }
-        activeHeaders = headers
-
         playerStateText = "Connecting…"
-        isPlaying = true
+
+        Task {
+            let resolved = await TokenRefreshManager.shared.applyLiveToken(to: parsed.cleanUrl, channel: channel)
+            await MainActor.run {
+                currentRawUrl = resolved.url
+                var headers = resolved.headers
+                for (k, v) in parsed.headers { headers[k] = v }
+                activeHeaders = headers
+                isPlaying = true
+            }
+        }
     }
 
     private func handlePlayerState(_ state: VLCMediaPlayerState) {
@@ -658,6 +661,8 @@ struct StreamPlayerSheet: View {
         case .ended:
             playerStateText = "Stream Ended"
             isPlaying = false
+        case .esAdded:
+            break
         @unknown default:
             break
         }
