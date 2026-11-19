@@ -1,47 +1,129 @@
 import SwiftUI
 import VLCKit
 
-struct VLCPlayerContainerView: UIViewRepresentable {
+// MARK: - VLC Video Rendering Surface Container
+
+class VLCVideoContainerView: UIView {
+    weak var player: VLCMediaPlayer?
+
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        backgroundColor = .black
+        contentMode = .scaleAspectFit
+        autoresizingMask = [.flexibleWidth, .flexibleHeight]
+    }
+
+    required init?(coder: NSCoder) {
+        super.init(coder: coder)
+        backgroundColor = .black
+        contentMode = .scaleAspectFit
+        autoresizingMask = [.flexibleWidth, .flexibleHeight]
+    }
+
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        // Ensure player binds to drawable once the view has positive dimensions
+        if let player = player, bounds.width > 0, bounds.height > 0 {
+            if player.drawable as? UIView != self {
+                player.drawable = self
+            }
+        }
+    }
+}
+
+// MARK: - SwiftUI Representable for VLC Player
+
+struct VLCPlayerView: UIViewRepresentable {
     let url: URL
     let headers: [String: String]
     @Binding var player: VLCMediaPlayer?
+    var onStateChanged: ((VLCMediaPlayerState) -> Void)? = nil
 
-    func makeUIView(context: Context) -> UIView {
-        let view = UIView(frame: .zero)
-        view.backgroundColor = .black
+    func makeCoordinator() -> Coordinator {
+        Coordinator(self)
+    }
 
+    class Coordinator: NSObject, VLCMediaPlayerDelegate {
+        var parent: VLCPlayerView
+        var player: VLCMediaPlayer?
+        var currentUrl: URL?
+
+        init(_ parent: VLCPlayerView) {
+            self.parent = parent
+            super.init()
+        }
+
+        func mediaPlayerStateChanged(_ aNotification: Notification!) {
+            guard let p = aNotification.object as? VLCMediaPlayer else { return }
+            DispatchQueue.main.async {
+                self.parent.onStateChanged?(p.state)
+            }
+        }
+    }
+
+    func makeUIView(context: Context) -> VLCVideoContainerView {
+        let view = VLCVideoContainerView(frame: UIScreen.main.bounds)
         let mediaPlayer = VLCMediaPlayer()
+        mediaPlayer.delegate = context.coordinator
+        context.coordinator.player = mediaPlayer
+        view.player = mediaPlayer
         mediaPlayer.drawable = view
 
-        let media = VLCMedia(url: url)
-
-        var vlcOptions: [AnyHashable: Any] = [
-            ":network-caching": 3000,
-            ":clock-jitter": 0,
-            ":clock-synchro": 0
-        ]
-        if let ua = headers["User-Agent"] {
-            vlcOptions[":http-user-agent"] = ua
-        }
-        if let ref = headers["Referer"] {
-            vlcOptions[":http-referrer"] = ref
-        }
-        for (k, v) in headers {
-            vlcOptions[":http-header"] = "\(k): \(v)"
-        }
-        media.addOptions(vlcOptions)
-
-        mediaPlayer.media = media
-        mediaPlayer.play()
+        loadMedia(into: mediaPlayer, url: url, headers: headers)
+        context.coordinator.currentUrl = url
 
         DispatchQueue.main.async {
             self.player = mediaPlayer
+            mediaPlayer.play()
         }
         return view
     }
 
-    func updateUIView(_ uiView: UIView, context: Context) {}
+    func updateUIView(_ uiView: VLCVideoContainerView, context: Context) {
+        uiView.player = context.coordinator.player
+        if context.coordinator.currentUrl != url {
+            context.coordinator.currentUrl = url
+            if let p = context.coordinator.player {
+                loadMedia(into: p, url: url, headers: headers)
+                DispatchQueue.main.async {
+                    p.play()
+                }
+            }
+        }
+    }
+
+    static func dismantleUIView(_ uiView: VLCVideoContainerView, coordinator: Coordinator) {
+        coordinator.player?.stop()
+        coordinator.player?.drawable = nil
+        coordinator.player = nil
+        uiView.player = nil
+    }
+
+    private func loadMedia(into player: VLCMediaPlayer, url: URL, headers: [String: String]) {
+        let media = VLCMedia(url: url)
+        media.addOption(":network-caching=3000")
+        media.addOption(":clock-jitter=0")
+        media.addOption(":clock-synchro=0")
+
+        if let ua = headers["User-Agent"] {
+            media.addOption(":http-user-agent=\(ua)")
+        } else {
+            media.addOption(":http-user-agent=\(AppConfig.defaultUserAgent)")
+        }
+
+        if let ref = headers["Referer"] {
+            media.addOption(":http-referrer=\(ref)")
+        }
+
+        for (k, v) in headers where k != "User-Agent" && k != "Referer" {
+            media.addOption(":http-header=\(k): \(v)")
+        }
+
+        player.media = media
+    }
 }
+
+// MARK: - Stream Player Sheet (For Live TV & Direct Streams)
 
 struct StreamPlayerSheet: View {
     let channel: Channel
@@ -50,8 +132,10 @@ struct StreamPlayerSheet: View {
     @State private var vlcPlayer: VLCMediaPlayer? = nil
     @State private var selectedSourceKey: String = ""
     @State private var currentRawUrl: String = ""
+    @State private var activeHeaders: [String: String] = [:]
+    @State private var isPlaying: Bool = true
+    @State private var playerStateText: String = "Connecting…"
     @State private var statusMessage: String? = nil
-    @State private var isPlaying = true
 
     var sourceKeys: [String] {
         let keys = Array(channel.sources.keys).sorted()
@@ -61,26 +145,66 @@ struct StreamPlayerSheet: View {
     var body: some View {
         NavigationStack {
             VStack(spacing: 16) {
-                // Universal VLC / FFmpeg Player Container (Plays MKV, M3U8, TS, FLV, MP4)
-                if let url = URL(string: currentRawUrl), !currentRawUrl.isEmpty {
-                    VLCPlayerContainerView(
-                        url: url,
-                        headers: resolvedHeaders,
-                        player: $vlcPlayer
-                    )
-                    .frame(maxWidth: .infinity)
-                    .aspectRatio(16.0 / 9.0, contentMode: .fit)
-                    .background(Color.black)
-                    .clipShape(RoundedRectangle(cornerRadius: 12))
-                    .padding(.horizontal)
-                } else {
-                    Rectangle()
-                        .fill(Color.black)
+                // Universal VLC Player View (Plays MKV, M3U8, TS, FLV, MP4)
+                ZStack {
+                    if let streamURL = URL(string: currentRawUrl), !currentRawUrl.isEmpty {
+                        VLCPlayerView(
+                            url: streamURL,
+                            headers: activeHeaders,
+                            player: $vlcPlayer,
+                            onStateChanged: { state in
+                                handlePlayerState(state)
+                            }
+                        )
                         .frame(maxWidth: .infinity)
                         .aspectRatio(16.0 / 9.0, contentMode: .fit)
-                        .overlay(ProgressView("Loading Stream…"))
-                        .padding(.horizontal)
+                        .background(Color.black)
+                        .clipShape(RoundedRectangle(cornerRadius: 12))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 12)
+                                .stroke(Color.white.opacity(0.15), lineWidth: 1)
+                        )
+                    } else {
+                        Rectangle()
+                            .fill(Color.black)
+                            .frame(maxWidth: .infinity)
+                            .aspectRatio(16.0 / 9.0, contentMode: .fit)
+                            .overlay(
+                                VStack(spacing: 10) {
+                                    ProgressView().tint(.red)
+                                    Text(playerStateText).font(.caption).foregroundStyle(.gray)
+                                }
+                            )
+                    }
+
+                    // Live Badge
+                    VStack {
+                        HStack {
+                            HStack(spacing: 4) {
+                                Circle().fill(Color.red).frame(width: 6, height: 6)
+                                Text("LIVE").font(.system(size: 10, weight: .black)).foregroundStyle(.white)
+                            }
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 4)
+                            .background(Color.black.opacity(0.75))
+                            .clipShape(Capsule())
+                            .padding(10)
+
+                            Spacer()
+
+                            Text(playerStateText)
+                                .font(.system(size: 10, weight: .bold))
+                                .foregroundStyle(.white)
+                                .padding(.horizontal, 8)
+                                .padding(.vertical, 4)
+                                .background(Color.black.opacity(0.75))
+                                .clipShape(Capsule())
+                                .padding(10)
+                        }
+                        Spacer()
+                    }
                 }
+                .padding(.horizontal)
 
                 // Quick Playback Controls
                 HStack(spacing: 24) {
@@ -98,7 +222,7 @@ struct StreamPlayerSheet: View {
                         Image(systemName: isPlaying ? "pause.fill" : "play.fill")
                             .font(.title2)
                             .foregroundStyle(.white)
-                            .padding(12)
+                            .padding(14)
                             .background(Color.red)
                             .clipShape(Circle())
                     }
@@ -108,18 +232,37 @@ struct StreamPlayerSheet: View {
                             player.stop()
                             player.play()
                             isPlaying = true
+                            playerStateText = "Reloading…"
                         }
                     } label: {
                         Label("Reload Stream", systemImage: "arrow.clockwise")
                             .font(.subheadline.bold())
                             .foregroundStyle(.white)
                             .padding(.horizontal, 16)
-                            .padding(.vertical, 8)
+                            .padding(.vertical, 9)
                             .background(Color.white.opacity(0.15))
+                            .clipShape(Capsule())
+                    }
+
+                    Button {
+                        // Refresh token for this stream
+                        Task {
+                            await TokenRefreshManager.shared.refreshAllTokens()
+                            playSource(rawLine: currentRawUrl)
+                            statusMessage = "Live token refreshed!"
+                        }
+                    } label: {
+                        Label("Refresh Token", systemImage: "key.fill")
+                            .font(.subheadline.bold())
+                            .foregroundStyle(.white)
+                            .padding(.horizontal, 14)
+                            .padding(.vertical, 9)
+                            .background(Color.green.opacity(0.3))
                             .clipShape(Capsule())
                     }
                 }
 
+                // Multi-Server Source Switcher
                 if sourceKeys.count > 1 {
                     ScrollView(.horizontal, showsIndicators: false) {
                         HStack(spacing: 10) {
@@ -144,9 +287,11 @@ struct StreamPlayerSheet: View {
                     }
                 }
 
+                // Channel Info & Fallback Buttons
                 VStack(alignment: .leading, spacing: 8) {
                     Text(channel.name)
                         .font(.title3.bold())
+                        .foregroundStyle(.white)
                     Text(channel.group)
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
@@ -154,7 +299,7 @@ struct StreamPlayerSheet: View {
                     if let statusMessage {
                         Text(statusMessage)
                             .font(.caption)
-                            .foregroundStyle(.orange)
+                            .foregroundStyle(.green)
                     }
 
                     HStack(spacing: 12) {
@@ -162,7 +307,7 @@ struct StreamPlayerSheet: View {
                             UIPasteboard.general.string = currentRawUrl
                             statusMessage = "Stream URL copied to clipboard"
                         } label: {
-                            Label("Copy Stream URL", systemImage: "doc.on.doc")
+                            Label("Copy URL", systemImage: "doc.on.doc")
                                 .font(.footnote.weight(.medium))
                         }
                         .buttonStyle(.bordered)
@@ -184,6 +329,7 @@ struct StreamPlayerSheet: View {
                 Spacer()
             }
             .padding(.top)
+            .background(Color.black.ignoresSafeArea())
             .navigationTitle(channel.name)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -192,6 +338,7 @@ struct StreamPlayerSheet: View {
                         vlcPlayer?.stop()
                         dismiss()
                     }
+                    .foregroundStyle(.white)
                 }
             }
             .onAppear {
@@ -207,48 +354,42 @@ struct StreamPlayerSheet: View {
         }
     }
 
-    private var resolvedHeaders: [String: String] {
-        let parsed = M3UParser.parseUrlHeaders(currentRawUrl)
-        var headers = channel.httpHeaders
-        for (k, v) in parsed.headers { headers[k] = v }
-        if let ua = channel.userAgent, headers["User-Agent"] == nil { headers["User-Agent"] = ua }
-        if let ref = channel.httpReferer, headers["Referer"] == nil { headers["Referer"] = ref }
-        if let ck = channel.cookie, headers["Cookie"] == nil { headers["Cookie"] = ck }
-        if let org = channel.origin, headers["Origin"] == nil { headers["Origin"] = org }
-        if headers["User-Agent"] == nil { headers["User-Agent"] = AppConfig.defaultUserAgent }
-        return headers
-    }
-
     private func playSource(rawLine: String) {
         let parsed = M3UParser.parseUrlHeaders(rawLine)
-        currentRawUrl = parsed.cleanUrl
+        let resolved = TokenRefreshManager.shared.applyLiveToken(to: parsed.cleanUrl, channel: channel)
 
-        guard let streamURL = URL(string: parsed.cleanUrl) else {
-            statusMessage = "Invalid stream URL"
-            return
-        }
+        currentRawUrl = resolved.url
+        var headers = resolved.headers
+        for (k, v) in parsed.headers { headers[k] = v }
+        activeHeaders = headers
 
-        if let player = vlcPlayer {
-            let media = VLCMedia(url: streamURL)
-            var vlcOptions: [AnyHashable: Any] = [
-                ":network-caching": 3000,
-                ":clock-jitter": 0,
-                ":clock-synchro": 0
-            ]
-            if let ua = resolvedHeaders["User-Agent"] {
-                vlcOptions[":http-user-agent"] = ua
-            }
-            if let ref = resolvedHeaders["Referer"] {
-                vlcOptions[":http-referrer"] = ref
-            }
-            for (k, v) in resolvedHeaders {
-                vlcOptions[":http-header"] = "\(k): \(v)"
-            }
-            media.addOptions(vlcOptions)
-            player.media = media
-            player.play()
+        playerStateText = "Connecting…"
+        isPlaying = true
+    }
+
+    private func handlePlayerState(_ state: VLCMediaPlayerState) {
+        switch state {
+        case .opening:
+            playerStateText = "Opening stream…"
+        case .buffering:
+            playerStateText = "Buffering…"
+        case .playing:
+            playerStateText = "Playing"
             isPlaying = true
+        case .paused:
+            playerStateText = "Paused"
+            isPlaying = false
+        case .stopped:
+            playerStateText = "Stopped"
+            isPlaying = false
+        case .error:
+            playerStateText = "Playback Error"
+            isPlaying = false
+        case .ended:
+            playerStateText = "Stream Ended"
+            isPlaying = false
+        @unknown default:
+            break
         }
-        statusMessage = nil
     }
 }
