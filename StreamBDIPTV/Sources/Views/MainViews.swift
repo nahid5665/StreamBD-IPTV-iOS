@@ -988,9 +988,15 @@ struct NetflixMediaDetailSheet: View {
             .task {
                 await loadStreams()
             }
-            .sheet(isPresented: $isPlayingDirect) {
+            .fullScreenCover(isPresented: $isPlayingDirect) {
                 if let stream = selectedStream, let url = URL(string: stream.url) {
-                    UniversalVideoPlayerSheet(url: url, title: media.displayTitle, headers: stream.headers ?? [:])
+                    UniversalFullScreenPlayerView(
+                        url: url,
+                        title: media.displayTitle,
+                        subtitle: stream.provider,
+                        headers: stream.headers ?? [:],
+                        isLive: false
+                    )
                 }
             }
             .sheet(isPresented: $isPlayingEmbed) {
@@ -1091,32 +1097,14 @@ struct UniversalVideoPlayerSheet: View {
     let headers: [String: String]
     @Environment(\.dismiss) private var dismiss
 
-    @State private var vlcPlayer: VLCMediaPlayer? = nil
-    @State private var isPlaying = true
-
     var body: some View {
-        NavigationStack {
-            VStack(spacing: 0) {
-                VLCPlayerView(url: url, headers: headers, player: $vlcPlayer)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .background(Color.black.ignoresSafeArea())
-            }
-            .navigationTitle(title)
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .navigationBarTrailing) {
-                    Button("Done") {
-                        vlcPlayer?.stop()
-                        dismiss()
-                    }
-                    .foregroundStyle(.white)
-                }
-            }
-            .onDisappear {
-                vlcPlayer?.stop()
-                vlcPlayer = nil
-            }
-        }
+        UniversalFullScreenPlayerView(
+            url: url,
+            title: title,
+            subtitle: nil,
+            headers: headers,
+            isLive: false
+        )
     }
 }
 
