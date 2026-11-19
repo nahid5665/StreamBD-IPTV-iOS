@@ -76,90 +76,35 @@ final class VODViewModel: ObservableObject {
         }
     }
 
-    /// Resolves all available BDIX FTP servers + Global stream sources for a title
+    /// Resolves all available BDIX FTP servers + Global stream sources for a title using all 24 addons
     func resolveStreams(for media: TmdbMedia, season: Int = 1, episode: Int = 1) async -> [StreamSource] {
-        var sources: [StreamSource] = []
         let isTV = !media.isMovie
         let id = media.id
+        let year = media.displayDate
 
-        // 1. Live BDIX CineplexBD Scraping (Ultra fast in Bangladesh)
-        let cineplexSources = await CineplexScraper.shared.resolveStreams(
+        return await BDIXAddonScraper.shared.resolveAllAddons(
             title: media.displayTitle,
+            year: year,
             isTV: isTV,
             season: season,
-            episode: episode
+            episode: episode,
+            tmdbId: id
         )
-        sources.append(contentsOf: cineplexSources)
-
-        // 2. High-Speed Global Streaming Servers & Multi-Embeds
-        if isTV {
-            sources.append(StreamSource(
-                url: "https://vidsrc.me/embed/tv?tmdb=\(id)&season=\(season)&episode=\(episode)",
-                quality: "1080P",
-                provider: "VidSrc HD (Server 2)",
-                type: "embed"
-            ))
-            sources.append(StreamSource(
-                url: "https://multiembed.mov/?video_id=\(id)&tmdb=1&s=\(season)&e=\(episode)",
-                quality: "Multi-Server",
-                provider: "MultiEmbed (Server 3)",
-                type: "embed"
-            ))
-            sources.append(StreamSource(
-                url: "https://superembed.stream/?video_id=\(id)&tmdb=1&s=\(season)&e=\(episode)",
-                quality: "Auto",
-                provider: "SuperEmbed (Server 4)",
-                type: "embed"
-            ))
-            sources.append(StreamSource(
-                url: "https://www.2embed.cc/embedtv/\(id)&s=\(season)&e=\(episode)",
-                quality: "HD",
-                provider: "2Embed (Server 5)",
-                type: "embed"
-            ))
-        } else {
-            sources.append(StreamSource(
-                url: "https://vidsrc.me/embed/movie?tmdb=\(id)",
-                quality: "1080P",
-                provider: "VidSrc HD (Server 2)",
-                type: "embed"
-            ))
-            sources.append(StreamSource(
-                url: "https://multiembed.mov/?video_id=\(id)&tmdb=1",
-                quality: "Multi-Server",
-                provider: "MultiEmbed (Server 3)",
-                type: "embed"
-            ))
-            sources.append(StreamSource(
-                url: "https://superembed.stream/?video_id=\(id)&tmdb=1",
-                quality: "Auto",
-                provider: "SuperEmbed (Server 4)",
-                type: "embed"
-            ))
-            sources.append(StreamSource(
-                url: "https://www.2embed.cc/embed/\(id)",
-                quality: "HD",
-                provider: "2Embed (Server 5)",
-                type: "embed"
-            ))
-        }
-
-        return sources
     }
 
     func fetchTvSeasons(tvId: Int) async -> [TmdbSeason] {
         let url = "\(AppConfig.tmdbBaseURL)/tv/\(tvId)?api_key=\(AppConfig.tmdbApiKey)&language=en-US"
         guard let details = try? await NetworkManager.shared.fetchDecodable(TmdbTvShowDetails.self, from: url) else {
-            return [TmdbSeason(id: 1, name: "Season 1", season_number: 1, episode_count: 10)]
+            return []
         }
-        return (details.seasons ?? []).filter { $0.season_number > 0 }
+        return (details.seasons ?? []).filter { ($0.season_number) > 0 }
     }
 
     func fetchSeasonEpisodes(tvId: Int, seasonNumber: Int) async -> [TmdbEpisode] {
         let url = "\(AppConfig.tmdbBaseURL)/tv/\(tvId)/season/\(seasonNumber)?api_key=\(AppConfig.tmdbApiKey)&language=en-US"
-        guard let res = try? await NetworkManager.shared.fetchDecodable(TmdbSeasonDetailResponse.self, from: url) else {
+        guard let details = try? await NetworkManager.shared.fetchDecodable(TmdbSeasonDetailResponse.self, from: url) else {
             return []
         }
-        return res.episodes ?? []
+        return details.episodes ?? []
     }
 }
