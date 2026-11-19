@@ -3,117 +3,101 @@ import SwiftUI
 
 @MainActor
 final class MainViewModel: ObservableObject {
-    @Published var categories: [LiveCategory] = []
-    @Published var allChannels: [Channel] = []
+    @Published var playlists: [EmbeddedPlaylist] = AppConfig.bundledPlaylists
     @Published var selectedCategory: String = "All"
     @Published var searchQuery: String = ""
     @Published var isLoading: Bool = false
     @Published var errorMessage: String? = nil
     @Published var activeChannel: Channel? = nil
+    @Published var activePlaylist: EmbeddedPlaylist? = nil
 
-    var filteredChannels: [Channel] {
-        allChannels.filter { ch in
-            let matchesGroup = (selectedCategory == "All") || ch.group.localizedCaseInsensitiveCompare(selectedCategory) == .orderedSame
+    // Cache of channels per playlist: playlist.name -> [Channel]
+    @Published var playlistChannelsCache: [String: [Channel]] = [:]
+    @Published var allChannels: [Channel] = []
+
+    var playlistCategories: [String] {
+        let set = Set(playlists.map { $0.category }).sorted()
+        return ["All"] + set
+    }
+
+    var filteredPlaylists: [EmbeddedPlaylist] {
+        playlists.filter { pl in
+            let matchesCategory = (selectedCategory == "All") || pl.category.localizedCaseInsensitiveCompare(selectedCategory) == .orderedSame
             let matchesSearch = searchQuery.isEmpty ||
-                ch.name.localizedCaseInsensitiveContains(searchQuery) ||
-                ch.group.localizedCaseInsensitiveContains(searchQuery)
-            return matchesGroup && matchesSearch
+                pl.name.localizedCaseInsensitiveContains(searchQuery) ||
+                pl.category.localizedCaseInsensitiveContains(searchQuery)
+            return matchesCategory && matchesSearch
         }
     }
 
-    var availableGroups: [String] {
-        let groups = Set(allChannels.map { $0.group }).sorted()
-        return ["All"] + groups
+    var filteredGlobalChannels: [Channel] {
+        guard !searchQuery.isEmpty else { return [] }
+        return allChannels.filter { ch in
+            ch.name.localizedCaseInsensitiveContains(searchQuery) ||
+            ch.group.localizedCaseInsensitiveContains(searchQuery)
+        }
     }
 
-    func loadAllLiveChannels() async {
-        guard !isLoading else { return }
+    init() {
+        // Start background token refresh on init
+        Task {
+            await TokenRefreshManager.shared.refreshAllTokens()
+        }
+    }
+
+    /// Preloads essential playlists (AKASH GO, Toffee, FanCode, Cineplex)
+    func loadInitialPlaylists() async {
+        guard allChannels.isEmpty else { return }
         isLoading = true
-        errorMessage = nil
 
-        var combined: [Channel] = []
-
-        // 1. Build initial categories from ALL 44 BUNDLED PLAYLISTS
-        var categoryMap: [String: LiveCategory] = [:]
-        for pl in AppConfig.bundledPlaylists {
-            categoryMap[pl.name] = LiveCategory(name: pl.name, url: pl.url, logo: pl.logo)
+        // Load AKASH GO as the default primary channels
+        if let akash = playlists.first(where: { $0.name == "AKASH GO" }) {
+            let channels = await loadChannels(for: akash)
+            self.allChannels = channels
         }
 
-        // 2. Fetch remote categories from decrypted RemoteConfig IPTV.json (if available)
-        if let rawText = try? await NetworkManager.shared.fetchText(from: AppConfig.iptvPlaylistURL),
-           let jsonData = rawText.data(using: .utf8) {
-            let decoder = JSONDecoder()
-            var remoteDict: [String: PlaylistInfo] = [:]
-
-            if let single = try? decoder.decode(LiveCategoryResponse.self, from: jsonData) {
-                remoteDict = single.playlists
-            } else if let arr = try? decoder.decode([LiveCategoryResponse].self, from: jsonData),
-                      let first = arr.first {
-                remoteDict = first.playlists
-            }
-
-            for (catName, info) in remoteDict {
-                let logoUrl = M3UParser.normalizeLogo(info.logo ?? "")
-                categoryMap[catName] = LiveCategory(name: catName, url: info.url, logo: logoUrl)
-            }
-        }
-
-        let finalCategories = categoryMap.values.sorted(by: { $0.name < $1.name })
-        self.categories = finalCategories
-
-        // 3. Concurrently fetch channels from all 44 playlists
-        await withTaskGroup(of: [Channel].self) { group in
-            for cat in finalCategories {
-                group.addTask {
-                    await Self.fetchCategoryChannels(category: cat)
-                }
-            }
-            for await catChannels in group {
-                combined.append(contentsOf: catChannels)
-            }
-        }
-
-        // 4. Merge metadata & logos from bundled assets/channels.json
-        let bundledLogoMap = Self.loadBundledLogoMap()
-        for idx in combined.indices {
-            if combined[idx].logo.isEmpty,
-               let mappedLogo = bundledLogoMap[combined[idx].name.lowercased()] {
-                combined[idx].logo = mappedLogo
-            }
-        }
-
-        // 5. Deduplicate channels by name while preserving multi-server streaming sources
-        var seen: [String: Int] = [:]
-        var deduped: [Channel] = []
-        for ch in combined {
-            let key = ch.name.lowercased().trimmingCharacters(in: .whitespaces)
-            if let existingIdx = seen[key] {
-                let sourceLabel = "Server \(deduped[existingIdx].sources.count + 1)"
-                deduped[existingIdx].sources[sourceLabel] = ch.sources.values.first ?? ch.url
-            } else {
-                seen[key] = deduped.count
-                deduped.append(ch)
-            }
-        }
-
-        self.allChannels = deduped
-        self.isLoading = false
+        isLoading = false
     }
 
-    static func fetchCategoryChannels(category: LiveCategory) async -> [Channel] {
-        let urlStr = category.url
-        if urlStr.hasPrefix("myiptv://proxy") {
-            return await fetchMagicProxyChannels(proxyUrl: urlStr, defaultGroup: category.name)
+    /// Loads channels for a specific playlist (from cache or network)
+    func loadChannels(for playlist: EmbeddedPlaylist) async -> [Channel] {
+        if let cached = playlistChannelsCache[playlist.name], !cached.isEmpty {
+            return cached
         }
+
+        let channels = await Self.fetchPlaylistChannels(playlist: playlist)
+        playlistChannelsCache[playlist.name] = channels
+
+        // Append to allChannels for search
+        for ch in channels {
+            if !allChannels.contains(where: { $0.name == ch.name }) {
+                allChannels.append(ch)
+            }
+        }
+        return channels
+    }
+
+    /// Fetches and parses playlist content with token injection
+    static func fetchPlaylistChannels(playlist: EmbeddedPlaylist) async -> [Channel] {
+        let urlStr = playlist.url
+
+        if urlStr.hasPrefix("myiptv://proxy") {
+            return await fetchMagicProxyChannels(proxyUrl: urlStr, defaultGroup: playlist.name)
+        }
+
         guard let rawContent = try? await NetworkManager.shared.fetchText(from: urlStr) else {
             return []
         }
+
         let trimmed = rawContent.trimmingCharacters(in: .whitespacesAndNewlines)
-        if trimmed.hasPrefix("// JS PLAYLIST") || trimmed.hasPrefix("// BASE_URL=") || trimmed.contains("generatePlaylist()") {
+
+        // Handle JS Playlists
+        if trimmed.hasPrefix("// JS PLAYLIST") || trimmed.hasPrefix("// BASE_URL=") || trimmed.contains("generatePlaylist()") || trimmed.contains("generatePlusBoxPlaylist()") {
             let m3u = await JSRunner.shared.executePlaylistScript(trimmed)
-            return M3UParser.parsePlaylist(m3u, defaultGroup: category.name)
+            return M3UParser.parsePlaylist(m3u, defaultGroup: playlist.name)
         }
-        return M3UParser.parsePlaylist(trimmed, defaultGroup: category.name)
+
+        return M3UParser.parsePlaylist(trimmed, defaultGroup: playlist.name)
     }
 
     static func fetchMagicProxyChannels(proxyUrl: String, defaultGroup: String) async -> [Channel] {
@@ -148,52 +132,32 @@ final class MainViewModel: ObservableObject {
 
         var current: Any = rootObj
         if !arrayPath.isEmpty {
-            for seg in arrayPath.split(separator: ".") {
-                if let dict = current as? [String: Any], let next = dict[String(seg)] {
+            for segment in arrayPath.components(separatedBy: ".") {
+                if let dict = current as? [String: Any], let next = dict[segment] {
                     current = next
                 }
             }
         }
-        guard let arr = current as? [[String: Any]] else { return [] }
 
-        var channels: [Channel] = []
-        for item in arr {
+        guard let array = current as? [[String: Any]] else { return [] }
+        var result: [Channel] = []
+
+        for item in array {
             guard let rawStream = item[streamField] as? String, !rawStream.isEmpty else { continue }
-            let title = (item[titleField] as? String) ?? "Channel"
-            let logo = M3UParser.normalizeLogo((item[logoField] as? String) ?? "")
+            let name = (item[titleField] as? String) ?? "Channel"
+            let logo = (item[logoField] as? String) ?? ""
             let group = (item[categoryField] as? String) ?? defaultGroup
-            let fullLine = "\(prefix)\(rawStream)\(suffix)"
-            let parsed = M3UParser.parseUrlHeaders(fullLine)
-            channels.append(Channel(
-                name: title,
-                url: parsed.cleanUrl,
+            let streamUrl = "\(prefix)\(rawStream)\(suffix)"
+
+            result.append(Channel(
+                name: name,
+                url: streamUrl,
                 logo: logo,
                 group: group,
-                userAgent: parsed.headers["User-Agent"],
-                cookie: parsed.headers["Cookie"],
-                httpReferer: parsed.headers["Referer"],
-                origin: parsed.headers["Origin"],
-                httpHeaders: parsed.headers,
-                tokenUrl: parsed.tokenUrl,
-                sources: ["Default": fullLine]
+                httpHeaders: customHeaders,
+                sources: ["Default": streamUrl]
             ))
         }
-        return channels
-    }
-
-    static func loadBundledLogoMap() -> [String: String] {
-        guard let path = Bundle.main.path(forResource: "channels", ofType: "json"),
-              let data = try? Data(contentsOf: URL(fileURLWithPath: path)),
-              let items = try? JSONDecoder().decode([BundledChannelItem].self, from: data) else {
-            return [:]
-        }
-        var map: [String: String] = [:]
-        for item in items {
-            let logo = M3UParser.normalizeLogo(item.tvgLogo ?? item.image ?? "")
-            if !logo.isEmpty {
-                map[item.name.lowercased()] = logo
-            }
-        }
-        return map
+        return result
     }
 }
