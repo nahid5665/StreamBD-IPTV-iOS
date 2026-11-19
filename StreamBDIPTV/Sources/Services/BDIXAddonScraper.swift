@@ -68,7 +68,7 @@ final class BDIXAddonScraper {
             return []
         }
 
-        var searchReq = URLRequest(searchUrl)
+        var searchReq = URLRequest(url: searchUrl)
         searchReq.setValue("Bearer \(token)", forHTTPHeaderField: "authorization")
         searchReq.setValue(token, forHTTPHeaderField: "x-auth-token")
         searchReq.setValue(androidUA, forHTTPHeaderField: "User-Agent")
