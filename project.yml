@@ -29,8 +29,8 @@ targets:
         CFBundleDisplayName: "StreamBD IPTV"
         CFBundleName: "StreamBDIPTV"
         CFBundleIdentifier: "com.streambd.iptv"
-        CFBundleShortVersionString: "5.0"
-        CFBundleVersion: "50"
+        CFBundleShortVersionString: "5.2"
+        CFBundleVersion: "52"
         LSRequiresIPhoneOS: true
         UILaunchScreen:
           UIColorName: ""
@@ -51,8 +51,8 @@ targets:
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.streambd.iptv
-        MARKETING_VERSION: "5.0"
-        CURRENT_PROJECT_VERSION: "50"
+        MARKETING_VERSION: "5.2"
+        CURRENT_PROJECT_VERSION: "52"
         SWIFT_VERSION: "5.9"
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         CODE_SIGN_IDENTITY: ""
