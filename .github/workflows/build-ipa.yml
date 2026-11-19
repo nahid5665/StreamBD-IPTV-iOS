@@ -1,4 +1,4 @@
-name: Build StreamBD IPTV iOS IPA
+name: Build Eentertainment iOS IPA
 
 on:
   workflow_dispatch:
@@ -22,13 +22,13 @@ jobs:
         run: xcodegen generate
 
       - name: Resolve Swift Packages
-        run: xcodebuild -resolvePackageDependencies -project StreamBDIPTV.xcodeproj
+        run: xcodebuild -resolvePackageDependencies -project Eentertainment.xcodeproj
 
       - name: Build Unsigned iOS App (arm64)
         run: |
           xcodebuild clean build \
-            -project StreamBDIPTV.xcodeproj \
-            -scheme StreamBDIPTV \
+            -project Eentertainment.xcodeproj \
+            -scheme Eentertainment \
             -configuration Release \
             -sdk iphoneos \
             -derivedDataPath build \
@@ -41,29 +41,45 @@ jobs:
       - name: Package .app into Unsigned .ipa (LiveContainer / SideStore / Sideloadly Ready)
         run: |
           mkdir -p Payload
-          cp -r build/Build/Products/Release-iphoneos/StreamBDIPTV.app Payload/
-          zip -r9 StreamBD-IPTV-v5.2-iOS.ipa Payload
+          cp -r build/Build/Products/Release-iphoneos/Eentertainment.app Payload/
+          zip -r9 Eentertainment-v5.3-iOS.ipa Payload
 
       - name: Upload Unsigned IPA Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: StreamBD-IPTV-v5.2-iOS-IPA
-          path: StreamBD-IPTV-v5.2-iOS.ipa
+          name: Eentertainment-v5.3-iOS-IPA
+          path: Eentertainment-v5.3-iOS.ipa
           if-no-files-found: error
 
       - name: Publish Direct IPA to GitHub Releases
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v5.2.0-universal-vlc-stream
-          name: "StreamBD IPTV v5.2.0 — Universal VLC & 44 Playlists"
+          tag_name: v5.3.0-eentertainment
+          name: "Eentertainment v5.3.0 — Apple Liquid Glass + 44 Playlists + 24 Addons"
           body: |
-            ### StreamBD IPTV v5.2.0 (Universal VLC + 44 Playlists + 24 Addons)
-            
-            - **Universal VLC Player Engine**: True hardware-accelerated playback for MKV, M3U8, TS, FLV, and MP4.
-            - **All 44 Playlists Categorized**: Bangla TV, Sports, BDIX FTP, Indian TV, Bangla OTT, International with channel browser.
-            - **Automatic Token Refresh**: 2-hour scheduled refresh loop + instant launch refresh for PlusBox, Jio TV, Toffee, and Oxoo portals.
-            - **Full Addon Resolution for Movies & Series**: CTG Movies FTP (BDIX), Cineplex BD (BDIX), RoarZone (BDIX), 11Plus WEB (BDIX), Net Mirror, VidSrc HD, MultiEmbed, SuperEmbed, 2Embed.
-            - **Direct .IPA Download**: Ready for LiveContainer, SideStore, AltStore, TrollStore, and Sideloadly.
-          files: StreamBD-IPTV-v5.2-iOS.ipa
+            ### Eentertainment v5.3.0
+
+            🎬 **Complete Streaming App — Liquid Glass Apple Design**
+
+            #### What's New in v5.3
+            - **New App Name**: Eentertainment (renamed from StreamBD IPTV)
+            - **Apple Liquid Glass UI**: Authentic iOS-style blur, spring physics, and fluid motion
+            - **Spring Animations**: Interactive press states with `.interactiveSpring()` physics
+            - **Tactile Feedback**: ScaleButtonStyle with haptic press response
+            - **Ambient Glow Effects**: Colored backdrop blur halos behind cards
+
+            #### Core Features
+            - **Universal VLC Engine**: Hardware-accelerated MKV, M3U8, TS, MP4, FLV, AVI playback
+            - **44 Live IPTV Playlists**: Bangla TV, Sports, BDIX FTP, Indian TV, OTT, International
+            - **24 Movie & Series Addons**: CTG Movies, Cineplex BD, RoarZone, 11Plus, Net Mirror, VixSrc, PPCine, MovieBox, and more
+            - **Auto Token Refresh**: 2-hour loop for PlusBox, Jio TV, Toffee, Oxoo portals
+            - **Smart Addon Filtering**: Only shows addons that actually have the selected movie/series
+            - **TMDB Integration**: Trending movies, Bangla films, Bollywood, top-rated, search
+
+            #### Install
+            - **AltStore / SideStore / LiveContainer**: Direct IPA install
+            - **TrollStore**: Sign and install directly
+            - **Sideloadly**: Drag `.ipa` and sideload
+          files: Eentertainment-v5.3-iOS.ipa
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
