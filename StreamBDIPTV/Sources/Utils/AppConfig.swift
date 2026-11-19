@@ -9,8 +9,8 @@ struct EmbeddedPlaylist: Hashable, Identifiable {
 }
 
 enum AppConfig {
-    static let appName = "StreamBD IPTV"
-    static let appVersion = "v5.2"
+    static let appName = "Eentertainment"
+    static let appVersion = "v5.3"
 
     // Native AES-128-CBC credentials
     static let nativeAesKey = "X3#yS@6k~u&hr$0z"
