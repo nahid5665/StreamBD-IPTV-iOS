@@ -22,7 +22,6 @@ class VLCVideoContainerView: UIView {
 
     override func layoutSubviews() {
         super.layoutSubviews()
-        // Ensure player binds to drawable once the view has positive dimensions
         if let player = player, bounds.width > 0, bounds.height > 0 {
             if player.drawable as? UIView != self {
                 player.drawable = self
@@ -38,6 +37,7 @@ struct VLCPlayerView: UIViewRepresentable {
     let headers: [String: String]
     @Binding var player: VLCMediaPlayer?
     var onStateChanged: ((VLCMediaPlayerState) -> Void)? = nil
+    var onTimeChanged: ((VLCTime, VLCTime) -> Void)? = nil
 
     func makeCoordinator() -> Coordinator {
         Coordinator(self)
@@ -57,6 +57,13 @@ struct VLCPlayerView: UIViewRepresentable {
             guard let p = aNotification.object as? VLCMediaPlayer else { return }
             DispatchQueue.main.async {
                 self.parent.onStateChanged?(p.state)
+            }
+        }
+
+        func mediaPlayerTimeChanged(_ aNotification: Notification!) {
+            guard let p = aNotification.object as? VLCMediaPlayer else { return }
+            DispatchQueue.main.async {
+                self.parent.onTimeChanged?(p.time, p.media?.length ?? VLCTime.null())
             }
         }
     }
@@ -113,13 +120,269 @@ struct VLCPlayerView: UIViewRepresentable {
 
         if let ref = headers["Referer"] {
             media.addOption(":http-referrer=\(ref)")
+            media.addOption(":http-referer=\(ref)")
         }
 
+        // Custom HTTP Headers (Cookie, Origin, Auth tokens)
+        var customHeaderStrings: [String] = []
         for (k, v) in headers where k != "User-Agent" && k != "Referer" {
+            customHeaderStrings.append("\(k): \(v)")
             media.addOption(":http-header=\(k): \(v)")
+        }
+        if !customHeaderStrings.isEmpty {
+            let joined = customHeaderStrings.joined(separator: "\r\n")
+            media.addOption(":http-custom-headers=\(joined)")
         }
 
         player.media = media
+    }
+}
+
+// MARK: - Universal Fullscreen Player View (With Complete HUD Controls & Scrubbing)
+
+struct UniversalFullScreenPlayerView: View {
+    let url: URL
+    let title: String
+    let subtitle: String?
+    let headers: [String: String]
+    let isLive: Bool
+    @Environment(\.dismiss) private var dismiss
+
+    @State private var vlcPlayer: VLCMediaPlayer? = nil
+    @State private var isPlaying: Bool = true
+    @State private var showControls: Bool = true
+    @State private var currentTimeText: String = "00:00"
+    @State private var totalTimeText: String = "00:00"
+    @State private var progressValue: Double = 0.0
+    @State private var isScrubbing: Bool = false
+    @State private var aspectRatioIndex: Int = 0
+    @State private var hideControlsTimer: Timer? = nil
+
+    private let aspectRatios: [(label: String, val: String?)] = [
+        ("Fit", nil),
+        ("16:9", "16:9"),
+        ("Fill", "FILL"),
+        ("4:3", "4:3")
+    ]
+
+    var body: some View {
+        ZStack {
+            Color.black.ignoresSafeArea()
+
+            // Video Canvas
+            VLCPlayerView(
+                url: url,
+                headers: headers,
+                player: $vlcPlayer,
+                onStateChanged: { state in
+                    isPlaying = (state == .playing)
+                },
+                onTimeChanged: { curr, total in
+                    guard !isScrubbing else { return }
+                    currentTimeText = curr.stringValue ?? "00:00"
+                    totalTimeText = total.stringValue ?? "00:00"
+                    if let p = vlcPlayer {
+                        progressValue = Double(p.position)
+                    }
+                }
+            )
+            .ignoresSafeArea()
+            .onTapGesture {
+                withAnimation(.easeInOut(duration: 0.2)) {
+                    showControls.toggle()
+                }
+                if showControls { resetHideTimer() }
+            }
+
+            // HUD Overlays
+            if showControls {
+                hudControlsOverlay
+                    .transition(.opacity)
+            }
+        }
+        .onAppear {
+            resetHideTimer()
+        }
+        .onDisappear {
+            hideControlsTimer?.invalidate()
+            vlcPlayer?.stop()
+            vlcPlayer = nil
+        }
+        .statusBarHidden(!showControls)
+    }
+
+    private var hudControlsOverlay: some View {
+        VStack {
+            // Top Bar
+            HStack(spacing: 14) {
+                Button {
+                    vlcPlayer?.stop()
+                    dismiss()
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .font(.system(size: 28))
+                        .foregroundStyle(.white.opacity(0.85))
+                }
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(title)
+                        .font(.headline.bold())
+                        .foregroundStyle(.white)
+                        .lineLimit(1)
+                    if let subtitle, !subtitle.isEmpty {
+                        Text(subtitle)
+                            .font(.caption)
+                            .foregroundStyle(.white.opacity(0.7))
+                    }
+                }
+
+                Spacer()
+
+                // Aspect Ratio Toggle
+                Button {
+                    aspectRatioIndex = (aspectRatioIndex + 1) % aspectRatios.count
+                    let currentRatio = aspectRatios[aspectRatioIndex]
+                    if let p = vlcPlayer {
+                        if let r = currentRatio.val, r != "FILL" {
+                            let cString = (r as NSString).utf8String
+                            p.videoAspectRatio = UnsafeMutablePointer(mutating: cString)
+                        } else {
+                            p.videoAspectRatio = nil
+                        }
+                    }
+                } label: {
+                    Text(aspectRatios[aspectRatioIndex].label)
+                        .font(.system(size: 11, weight: .bold))
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 6)
+                        .background(Color.white.opacity(0.2))
+                        .clipShape(Capsule())
+                }
+
+                // Fullscreen Exit
+                Button {
+                    dismiss()
+                } label: {
+                    Image(systemName: "arrow.down.right.and.arrow.up.left")
+                        .font(.system(size: 18, weight: .semibold))
+                        .foregroundStyle(.white)
+                        .padding(8)
+                        .background(Color.white.opacity(0.2))
+                        .clipShape(Circle())
+                }
+            }
+            .padding(.horizontal, 20)
+            .padding(.top, 14)
+
+            Spacer()
+
+            // Center Play/Pause & Skip Controls
+            HStack(spacing: 48) {
+                // Rewind 10s
+                Button {
+                    if let p = vlcPlayer {
+                        p.jumpBackward(10)
+                    }
+                    resetHideTimer()
+                } label: {
+                    Image(systemName: "gobackward.10")
+                        .font(.system(size: 32, weight: .medium))
+                        .foregroundStyle(.white)
+                }
+
+                // Play / Pause
+                Button {
+                    if let p = vlcPlayer {
+                        if p.isPlaying {
+                            p.pause()
+                            isPlaying = false
+                        } else {
+                            p.play()
+                            isPlaying = true
+                        }
+                    }
+                    resetHideTimer()
+                } label: {
+                    Image(systemName: isPlaying ? "pause.fill" : "play.fill")
+                        .font(.system(size: 44, weight: .bold))
+                        .foregroundStyle(.white)
+                        .padding(20)
+                        .background(Color.white.opacity(0.25))
+                        .clipShape(Circle())
+                }
+
+                // Forward 10s
+                Button {
+                    if let p = vlcPlayer {
+                        p.jumpForward(10)
+                    }
+                    resetHideTimer()
+                } label: {
+                    Image(systemName: "goforward.10")
+                        .font(.system(size: 32, weight: .medium))
+                        .foregroundStyle(.white)
+                }
+            }
+
+            Spacer()
+
+            // Bottom Bar (Scrubbing / Progress)
+            VStack(spacing: 6) {
+                if !isLive {
+                    // Timeline Slider
+                    HStack(spacing: 12) {
+                        Text(currentTimeText)
+                            .font(.system(size: 11, weight: .medium, design: .monospaced))
+                            .foregroundStyle(.white)
+
+                        Slider(
+                            value: $progressValue,
+                            in: 0...1,
+                            onEditingChanged: { editing in
+                                isScrubbing = editing
+                                if !editing, let p = vlcPlayer {
+                                    p.position = Float(progressValue)
+                                }
+                                resetHideTimer()
+                            }
+                        )
+                        .tint(Color(red: 0.4, green: 0.6, blue: 1.0))
+
+                        Text(totalTimeText)
+                            .font(.system(size: 11, weight: .medium, design: .monospaced))
+                            .foregroundStyle(.white)
+                    }
+                } else {
+                    HStack {
+                        Circle().fill(Color.red).frame(width: 8, height: 8)
+                        Text("LIVE BROADCAST")
+                            .font(.system(size: 11, weight: .black))
+                            .foregroundStyle(.white)
+                        Spacer()
+                    }
+                }
+            }
+            .padding(.horizontal, 24)
+            .padding(.bottom, 24)
+        }
+        .background(
+            LinearGradient(
+                colors: [Color.black.opacity(0.7), Color.clear, Color.black.opacity(0.75)],
+                startPoint: .top,
+                endPoint: .bottom
+            )
+            .ignoresSafeArea()
+        )
+    }
+
+    private func resetHideTimer() {
+        hideControlsTimer?.invalidate()
+        hideControlsTimer = Timer.scheduledTimer(withTimeInterval: 4.0, repeats: false) { _ in
+            withAnimation(.easeInOut(duration: 0.25)) {
+                showControls = false
+            }
+        }
     }
 }
 
@@ -136,6 +399,7 @@ struct StreamPlayerSheet: View {
     @State private var isPlaying: Bool = true
     @State private var playerStateText: String = "Connecting…"
     @State private var statusMessage: String? = nil
+    @State private var isFullScreen: Bool = false
 
     var sourceKeys: [String] {
         let keys = Array(channel.sources.keys).sorted()
@@ -145,7 +409,7 @@ struct StreamPlayerSheet: View {
     var body: some View {
         NavigationStack {
             VStack(spacing: 16) {
-                // Universal VLC Player View (Plays MKV, M3U8, TS, FLV, MP4)
+                // Universal VLC Player View
                 ZStack {
                     if let streamURL = URL(string: currentRawUrl), !currentRawUrl.isEmpty {
                         VLCPlayerView(
@@ -171,13 +435,13 @@ struct StreamPlayerSheet: View {
                             .aspectRatio(16.0 / 9.0, contentMode: .fit)
                             .overlay(
                                 VStack(spacing: 10) {
-                                    ProgressView().tint(.red)
+                                    ProgressView().tint(Color(red: 0.4, green: 0.6, blue: 1.0))
                                     Text(playerStateText).font(.caption).foregroundStyle(.gray)
                                 }
                             )
                     }
 
-                    // Live Badge
+                    // Live Badge & Fullscreen Button
                     VStack {
                         HStack {
                             HStack(spacing: 4) {
@@ -192,14 +456,18 @@ struct StreamPlayerSheet: View {
 
                             Spacer()
 
-                            Text(playerStateText)
-                                .font(.system(size: 10, weight: .bold))
-                                .foregroundStyle(.white)
-                                .padding(.horizontal, 8)
-                                .padding(.vertical, 4)
-                                .background(Color.black.opacity(0.75))
-                                .clipShape(Capsule())
-                                .padding(10)
+                            // Fullscreen Button
+                            Button {
+                                isFullScreen = true
+                            } label: {
+                                Image(systemName: "arrow.up.left.and.arrow.down.right")
+                                    .font(.system(size: 13, weight: .bold))
+                                    .foregroundStyle(.white)
+                                    .padding(8)
+                                    .background(Color.black.opacity(0.75))
+                                    .clipShape(Circle())
+                            }
+                            .padding(10)
                         }
                         Spacer()
                     }
@@ -207,7 +475,7 @@ struct StreamPlayerSheet: View {
                 .padding(.horizontal)
 
                 // Quick Playback Controls
-                HStack(spacing: 24) {
+                HStack(spacing: 20) {
                     Button {
                         if let player = vlcPlayer {
                             if player.isPlaying {
@@ -223,7 +491,13 @@ struct StreamPlayerSheet: View {
                             .font(.title2)
                             .foregroundStyle(.white)
                             .padding(14)
-                            .background(Color.red)
+                            .background(
+                                LinearGradient(
+                                    colors: [Color(red: 0.35, green: 0.55, blue: 1.0), Color(red: 0.55, green: 0.25, blue: 0.95)],
+                                    startPoint: .topLeading,
+                                    endPoint: .bottomTrailing
+                                )
+                            )
                             .clipShape(Circle())
                     }
 
@@ -238,26 +512,28 @@ struct StreamPlayerSheet: View {
                         Label("Reload Stream", systemImage: "arrow.clockwise")
                             .font(.subheadline.bold())
                             .foregroundStyle(.white)
-                            .padding(.horizontal, 16)
+                            .padding(.horizontal, 14)
                             .padding(.vertical, 9)
                             .background(Color.white.opacity(0.15))
                             .clipShape(Capsule())
                     }
 
+                    // Fullscreen Trigger Pill
                     Button {
-                        // Refresh token for this stream
-                        Task {
-                            await TokenRefreshManager.shared.refreshAllTokens()
-                            playSource(rawLine: currentRawUrl)
-                            statusMessage = "Live token refreshed!"
-                        }
+                        isFullScreen = true
                     } label: {
-                        Label("Refresh Token", systemImage: "key.fill")
+                        Label("Full Screen", systemImage: "arrow.up.left.and.arrow.down.right")
                             .font(.subheadline.bold())
                             .foregroundStyle(.white)
                             .padding(.horizontal, 14)
                             .padding(.vertical, 9)
-                            .background(Color.green.opacity(0.3))
+                            .background(
+                                LinearGradient(
+                                    colors: [Color(red: 0.35, green: 0.55, blue: 1.0), Color(red: 0.55, green: 0.25, blue: 0.95)],
+                                    startPoint: .leading,
+                                    endPoint: .trailing
+                                )
+                            )
                             .clipShape(Capsule())
                     }
                 }
@@ -277,8 +553,12 @@ struct StreamPlayerSheet: View {
                                         .font(.subheadline.weight(.semibold))
                                         .padding(.horizontal, 14)
                                         .padding(.vertical, 8)
-                                        .background(selectedSourceKey == key ? Color.red : Color.secondary.opacity(0.2))
-                                        .foregroundStyle(selectedSourceKey == key ? .white : .primary)
+                                        .background(
+                                            selectedSourceKey == key
+                                                ? LinearGradient(colors: [Color(red: 0.35, green: 0.55, blue: 1.0), Color(red: 0.55, green: 0.25, blue: 0.95)], startPoint: .leading, endPoint: .trailing)
+                                                : LinearGradient(colors: [Color.white.opacity(0.12)], startPoint: .leading, endPoint: .trailing)
+                                        )
+                                        .foregroundStyle(.white)
                                         .clipShape(Capsule())
                                 }
                             }
@@ -287,8 +567,8 @@ struct StreamPlayerSheet: View {
                     }
                 }
 
-                // Channel Info & Fallback Buttons
-                VStack(alignment: .leading, spacing: 8) {
+                // Channel Info
+                VStack(alignment: .leading, spacing: 6) {
                     Text(channel.name)
                         .font(.title3.bold())
                         .foregroundStyle(.white)
@@ -301,27 +581,6 @@ struct StreamPlayerSheet: View {
                             .font(.caption)
                             .foregroundStyle(.green)
                     }
-
-                    HStack(spacing: 12) {
-                        Button {
-                            UIPasteboard.general.string = currentRawUrl
-                            statusMessage = "Stream URL copied to clipboard"
-                        } label: {
-                            Label("Copy URL", systemImage: "doc.on.doc")
-                                .font(.footnote.weight(.medium))
-                        }
-                        .buttonStyle(.bordered)
-
-                        if let vlcUrl = URL(string: "vlc-x-callback://x-callback-url/stream?url=\(currentRawUrl.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? "")") {
-                            Link(destination: vlcUrl) {
-                                Label("External VLC", systemImage: "play.rectangle.fill")
-                                    .font(.footnote.weight(.medium))
-                            }
-                            .buttonStyle(.borderedProminent)
-                            .tint(.orange)
-                        }
-                    }
-                    .padding(.top, 4)
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.horizontal)
@@ -350,6 +609,17 @@ struct StreamPlayerSheet: View {
             .onDisappear {
                 vlcPlayer?.stop()
                 vlcPlayer = nil
+            }
+            .fullScreenCover(isPresented: $isFullScreen) {
+                if let streamURL = URL(string: currentRawUrl) {
+                    UniversalFullScreenPlayerView(
+                        url: streamURL,
+                        title: channel.name,
+                        subtitle: channel.group,
+                        headers: activeHeaders,
+                        isLive: true
+                    )
+                }
             }
         }
     }
