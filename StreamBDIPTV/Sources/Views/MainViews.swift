@@ -1,7 +1,6 @@
-import VLCKit
 import SwiftUI
-import AVKit
 import WebKit
+import VLCKit
 
 // MARK: - Liquid Glass Styles & View Modifiers
 
@@ -68,6 +67,7 @@ struct WebStreamPlayerView: UIViewRepresentable {
 struct ContentView: View {
     @StateObject private var mainViewModel = MainViewModel()
     @StateObject private var vodViewModel = VODViewModel()
+    @StateObject private var tokenManager = TokenRefreshManager.shared
     @State private var selectedTab: Int = 0
 
     var body: some View {
@@ -95,9 +95,7 @@ struct ContentView: View {
         }
         .preferredColorScheme(.dark)
         .task {
-            if mainViewModel.allChannels.isEmpty {
-                await mainViewModel.loadAllLiveChannels()
-            }
+            await mainViewModel.loadInitialPlaylists()
             if vodViewModel.trendingMovies.isEmpty {
                 await vodViewModel.loadCatalog()
             }
@@ -172,10 +170,8 @@ struct NetflixHomeView: View {
                         NetflixMediaRow(title: "Bengali Blockbusters & BDIX", items: vodVM.banglaMovies, vodVM: vodVM)
                     }
 
-                    // Live Channels Quick Bar (Akash / Toffee / Sony)
-                    if !liveVM.allChannels.isEmpty {
-                        NetflixLiveChannelsRow(channels: Array(liveVM.allChannels.prefix(15)), liveVM: liveVM)
-                    }
+                    // Quick Playlists Bar (Toffee, Akash, PlusBox, Jio)
+                    quickPlaylistsRow
 
                     // Bollywood Hits
                     if !vodVM.bollywoodMovies.isEmpty {
@@ -200,7 +196,7 @@ struct NetflixHomeView: View {
 
     private var netflixTopHeader: some View {
         HStack {
-            // Netflix Red "N" Logo Badge
+            // Netflix Red Logo
             Text("NETFLIX")
                 .font(.system(size: 22, weight: .black, design: .rounded))
                 .tracking(2)
@@ -214,12 +210,15 @@ struct NetflixHomeView: View {
 
             Spacer()
 
-            HStack(spacing: 18) {
-                Text("TV Shows").font(.subheadline.weight(.semibold))
-                Text("Movies").font(.subheadline.weight(.semibold))
-                Text("Categories").font(.subheadline.weight(.semibold))
+            HStack(spacing: 8) {
+                Circle().fill(Color.green).frame(width: 7, height: 7)
+                Text("VLC Engine Active")
+                    .font(.caption2.bold())
+                    .foregroundStyle(.green)
             }
-            .foregroundStyle(.white)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 5)
+            .liquidGlass(cornerRadius: 12, opacity: 0.3)
         }
         .padding(.horizontal, 20)
         .padding(.vertical, 10)
@@ -231,6 +230,50 @@ struct NetflixHomeView: View {
             )
             .ignoresSafeArea()
         )
+    }
+
+    private var quickPlaylistsRow: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Text("Featured IPTV Playlists").font(.title3.bold()).foregroundStyle(.white)
+                Spacer()
+                Text("44 Playlists").font(.caption.bold()).foregroundStyle(.red)
+            }
+            .padding(.horizontal, 16)
+
+            ScrollView(.horizontal, showsIndicators: false) {
+                LazyHStack(spacing: 12) {
+                    ForEach(liveVM.playlists.prefix(10)) { pl in
+                        Button {
+                            liveVM.activePlaylist = pl
+                        } label: {
+                            VStack(spacing: 6) {
+                                Image(systemName: "play.tv.fill")
+                                    .font(.title2)
+                                    .foregroundStyle(.red)
+
+                                Text(pl.name)
+                                    .font(.caption.bold())
+                                    .lineLimit(1)
+                                    .foregroundStyle(.white)
+
+                                Text(pl.category)
+                                    .font(.system(size: 9, weight: .bold))
+                                    .foregroundStyle(.gray)
+                            }
+                            .frame(width: 100, height: 75)
+                            .padding(8)
+                            .liquidGlass(cornerRadius: 14, opacity: 0.4)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+                .padding(.horizontal, 16)
+            }
+        }
+        .sheet(item: $liveVM.activePlaylist) { pl in
+            PlaylistChannelListView(playlist: pl, viewModel: liveVM)
+        }
     }
 }
 
@@ -253,7 +296,6 @@ struct NetflixHeroBanner: View {
             .frame(height: 480)
             .clipped()
 
-            // Dark Vignette Gradients
             LinearGradient(
                 stops: [
                     .init(color: .clear, location: 0.3),
@@ -264,10 +306,9 @@ struct NetflixHeroBanner: View {
                 endPoint: .bottom
             )
 
-            // Content info & Buttons
             VStack(spacing: 12) {
                 Text(media.displayTitle)
-                    .font(.system(size: 32, weight: .black, design: .rounded))
+                    .font(.system(size: 30, weight: .black, design: .rounded))
                     .multilineTextAlignment(.center)
                     .foregroundStyle(.white)
                     .shadow(color: .black, radius: 10, x: 0, y: 4)
@@ -318,7 +359,7 @@ struct NetflixHeroBanner: View {
     }
 }
 
-// MARK: - Netflix Top 10 Row (With Large Numbers)
+// MARK: - Netflix Top 10 Row
 
 struct NetflixTop10Row: View {
     let title: String
@@ -339,7 +380,6 @@ struct NetflixTop10Row: View {
                             vodVM.selectedMedia = item
                         } label: {
                             HStack(alignment: .bottom, spacing: -24) {
-                                // Huge Netflix Rank Number (1, 2, 3...)
                                 Text("\(index + 1)")
                                     .font(.system(size: 96, weight: .black, design: .rounded))
                                     .foregroundStyle(Color.black)
@@ -378,7 +418,7 @@ struct NetflixTop10Row: View {
     }
 }
 
-// MARK: - Netflix Standard Media Row
+// MARK: - Netflix Media Row
 
 struct NetflixMediaRow: View {
     let title: String
@@ -427,57 +467,261 @@ struct NetflixMediaRow: View {
     }
 }
 
-// MARK: - Netflix Live Channels Quick Row
+// MARK: - Live TV Netflix View (ALL 44 PLAYLISTS BROWSER)
 
-struct NetflixLiveChannelsRow: View {
-    let channels: [Channel]
-    @ObservedObject var liveVM: MainViewModel
+struct LiveTVNetflixView: View {
+    @ObservedObject var viewModel: MainViewModel
+    @ObservedObject var tokenManager = TokenRefreshManager.shared
+
+    private let columns = [
+        GridItem(.adaptive(minimum: 155), spacing: 14)
+    ]
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack {
-                Text("Live TV Channels (StreamBD)").font(.title3.bold()).foregroundStyle(.white)
-                Spacer()
-                Text("See All").font(.subheadline.bold()).foregroundStyle(.red)
-            }
-            .padding(.horizontal, 16)
+        NavigationStack {
+            VStack(spacing: 0) {
+                // Token Refresh & Live Status Bar
+                HStack {
+                    HStack(spacing: 6) {
+                        Circle().fill(Color.green).frame(width: 8, height: 8)
+                        Text(tokenManager.tokenStatus)
+                            .font(.system(size: 11, weight: .semibold))
+                            .foregroundStyle(.white)
+                    }
 
-            ScrollView(.horizontal, showsIndicators: false) {
-                LazyHStack(spacing: 14) {
-                    ForEach(channels) { channel in
-                        Button {
-                            liveVM.activeChannel = channel
-                        } label: {
-                            VStack(spacing: 8) {
-                                AsyncImage(url: URL(string: channel.logo)) { phase in
-                                    if let img = phase.image {
-                                        img.resizable().scaledToFit()
-                                    } else {
-                                        Image(systemName: "tv.fill").font(.title2).foregroundStyle(.red)
-                                    }
-                                }
-                                .frame(width: 50, height: 50)
-                                .padding(8)
+                    Spacer()
 
-                                Text(channel.name)
-                                    .font(.system(size: 11, weight: .bold))
-                                    .lineLimit(1)
-                                    .frame(width: 80)
-                                    .foregroundStyle(.white)
-                            }
-                            .padding(10)
-                            .liquidGlass(cornerRadius: 14, opacity: 0.4)
+                    Button {
+                        Task {
+                            await tokenManager.refreshAllTokens()
                         }
-                        .buttonStyle(.plain)
+                    } label: {
+                        HStack(spacing: 4) {
+                            Image(systemName: "arrow.clockwise")
+                                .font(.caption.bold())
+                            Text("Refresh")
+                                .font(.caption.bold())
+                        }
+                        .foregroundStyle(.red)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 4)
+                        .liquidGlass(cornerRadius: 8, opacity: 0.3)
                     }
                 }
                 .padding(.horizontal, 16)
+                .padding(.vertical, 8)
+                .background(Color.white.opacity(0.05))
+
+                // Category Filter Pills
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 8) {
+                        ForEach(viewModel.playlistCategories, id: \.self) { cat in
+                            Button {
+                                viewModel.selectedCategory = cat
+                            } label: {
+                                Text(cat)
+                                    .font(.subheadline.bold())
+                                    .padding(.horizontal, 14)
+                                    .padding(.vertical, 7)
+                                    .background(viewModel.selectedCategory == cat ? Color.red : Color.white.opacity(0.12))
+                                    .foregroundStyle(.white)
+                                    .clipShape(Capsule())
+                            }
+                        }
+                    }
+                    .padding(.horizontal)
+                    .padding(.vertical, 8)
+                }
+
+                // 44 Playlists Grid
+                ScrollView {
+                    LazyVGrid(columns: columns, spacing: 14) {
+                        ForEach(viewModel.filteredPlaylists) { playlist in
+                            Button {
+                                viewModel.activePlaylist = playlist
+                            } label: {
+                                VStack(alignment: .leading, spacing: 10) {
+                                    HStack {
+                                        if !playlist.logo.isEmpty {
+                                            AsyncImage(url: URL(string: playlist.logo)) { p in
+                                                if let img = p.image {
+                                                    img.resizable().scaledToFit()
+                                                } else {
+                                                    Image(systemName: "play.tv.fill").foregroundStyle(.red)
+                                                }
+                                            }
+                                            .frame(width: 32, height: 32)
+                                        } else {
+                                            Image(systemName: "tv.fill")
+                                                .font(.title3)
+                                                .foregroundStyle(.red)
+                                                .frame(width: 32, height: 32)
+                                        }
+
+                                        Spacer()
+
+                                        Text(playlist.category)
+                                            .font(.system(size: 9, weight: .bold))
+                                            .padding(.horizontal, 6)
+                                            .padding(.vertical, 3)
+                                            .background(categoryColor(for: playlist.category).opacity(0.3))
+                                            .foregroundStyle(categoryColor(for: playlist.category))
+                                            .clipShape(RoundedRectangle(cornerRadius: 6))
+                                    }
+
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        Text(playlist.name)
+                                            .font(.headline.bold())
+                                            .lineLimit(1)
+                                            .foregroundStyle(.white)
+
+                                        Text("Tap to view channels")
+                                            .font(.caption2)
+                                            .foregroundStyle(.gray)
+                                    }
+
+                                    HStack {
+                                        Text("StreamBD")
+                                            .font(.system(size: 10, weight: .medium))
+                                            .foregroundStyle(.secondary)
+                                        Spacer()
+                                        Image(systemName: "chevron.right")
+                                            .font(.caption.bold())
+                                            .foregroundStyle(.red)
+                                    }
+                                }
+                                .padding(14)
+                                .liquidGlass(cornerRadius: 14, opacity: 0.35)
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                    .padding()
+                    .padding(.bottom, 80)
+                }
+            }
+            .background(Color.black.ignoresSafeArea())
+            .navigationTitle("Live Playlists (44)")
+            .searchable(text: $viewModel.searchQuery, prompt: "Search 44 playlists…")
+            .sheet(item: $viewModel.activePlaylist) { pl in
+                PlaylistChannelListView(playlist: pl, viewModel: viewModel)
+            }
+            .sheet(item: $viewModel.activeChannel) { ch in
+                StreamPlayerSheet(channel: ch)
+            }
+        }
+    }
+
+    private func categoryColor(for cat: String) -> Color {
+        switch cat {
+        case "Bangla TV": return .green
+        case "Sports": return .red
+        case "BDIX FTP": return .blue
+        case "Indian TV": return .purple
+        case "Bangla OTT": return .orange
+        default: return .yellow
+        }
+    }
+}
+
+// MARK: - Playlist Channel List View
+
+struct PlaylistChannelListView: View {
+    let playlist: EmbeddedPlaylist
+    @ObservedObject var viewModel: MainViewModel
+    @Environment(\.dismiss) private var dismiss
+
+    @State private var channels: [Channel] = []
+    @State private var isLoading = true
+    @State private var searchQuery = ""
+
+    private var filteredChannels: [Channel] {
+        if searchQuery.isEmpty { return channels }
+        return channels.filter { $0.name.localizedCaseInsensitiveContains(searchQuery) }
+    }
+
+    private let columns = [
+        GridItem(.adaptive(minimum: 105), spacing: 14)
+    ]
+
+    var body: some View {
+        NavigationStack {
+            VStack(spacing: 0) {
+                if isLoading {
+                    Spacer()
+                    ProgressView("Loading \(playlist.name) Channels…")
+                        .tint(.red)
+                        .foregroundStyle(.white)
+                    Spacer()
+                } else if channels.isEmpty {
+                    Spacer()
+                    VStack(spacing: 12) {
+                        Image(systemName: "exclamationmark.triangle.fill")
+                            .font(.largeTitle)
+                            .foregroundStyle(.yellow)
+                        Text("No channels available in this playlist.")
+                            .font(.headline)
+                            .foregroundStyle(.white)
+                    }
+                    Spacer()
+                } else {
+                    ScrollView {
+                        LazyVGrid(columns: columns, spacing: 14) {
+                            ForEach(filteredChannels) { channel in
+                                Button {
+                                    viewModel.activeChannel = channel
+                                } label: {
+                                    VStack(spacing: 8) {
+                                        AsyncImage(url: URL(string: channel.logo)) { phase in
+                                            if let image = phase.image {
+                                                image.resizable().scaledToFit()
+                                            } else {
+                                                Image(systemName: "tv.fill").font(.title2).foregroundStyle(.red)
+                                            }
+                                        }
+                                        .frame(height: 50)
+                                        .padding(4)
+
+                                        Text(channel.name)
+                                            .font(.caption.bold())
+                                            .lineLimit(2)
+                                            .multilineTextAlignment(.center)
+                                            .foregroundStyle(.white)
+                                    }
+                                    .frame(maxWidth: .infinity)
+                                    .padding(10)
+                                    .liquidGlass(cornerRadius: 12, opacity: 0.35)
+                                }
+                                .buttonStyle(.plain)
+                            }
+                        }
+                        .padding()
+                        .padding(.bottom, 40)
+                    }
+                }
+            }
+            .background(Color.black.ignoresSafeArea())
+            .navigationTitle(playlist.name)
+            .navigationBarTitleDisplayMode(.inline)
+            .searchable(text: $searchQuery, prompt: "Search channels…")
+            .toolbar {
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    Button("Done") { dismiss() }.foregroundStyle(.white)
+                }
+            }
+            .task {
+                isLoading = true
+                channels = await viewModel.loadChannels(for: playlist)
+                isLoading = false
+            }
+            .sheet(item: $viewModel.activeChannel) { ch in
+                StreamPlayerSheet(channel: ch)
             }
         }
     }
 }
 
-// MARK: - Netflix Media Detail Sheet (Stream Player with CineplexBD)
+// MARK: - Netflix Media Detail Sheet (Stream Player with Addon Scrapers)
 
 struct NetflixMediaDetailSheet: View {
     let media: TmdbMedia
@@ -564,19 +808,23 @@ struct NetflixMediaDetailSheet: View {
                         tvSeriesSection
                     }
 
-                    // Available Streaming Servers (CineplexBD BDIX + Global)
+                    // Stream Providers & Addon Names
                     VStack(alignment: .leading, spacing: 10) {
-                        Text("Streaming Servers & BDIX Sources").font(.headline).foregroundStyle(.white)
+                        Text("Stream Providers & Addons (StreamBD VOD)")
+                            .font(.headline)
+                            .foregroundStyle(.white)
                             .padding(.horizontal, 16)
 
                         if isLoadingStreams {
                             HStack(spacing: 10) {
-                                ProgressView()
-                                Text("Searching CineplexBD & Streaming Addons…").font(.caption).foregroundStyle(.gray)
+                                ProgressView().tint(.red)
+                                Text("Resolving CTG Movies, Cineplex, RoarZone & Addons…")
+                                    .font(.caption)
+                                    .foregroundStyle(.gray)
                             }
                             .padding(.horizontal, 16)
                         } else if availableStreams.isEmpty {
-                            Text("No stream sources found on current Wi-Fi.").font(.caption).foregroundStyle(.red)
+                            Text("No streams currently found for this title.").font(.caption).foregroundStyle(.red)
                                 .padding(.horizontal, 16)
                         } else {
                             VStack(spacing: 10) {
@@ -587,11 +835,26 @@ struct NetflixMediaDetailSheet: View {
                                         HStack {
                                             Image(systemName: source.type == "direct" ? "bolt.fill" : "globe")
                                                 .foregroundStyle(source.type == "direct" ? .green : .orange)
-                                            VStack(alignment: .leading) {
-                                                Text(source.provider ?? "Server").font(.subheadline.bold()).foregroundStyle(.white)
-                                                Text(source.quality ?? "1080P").font(.caption).foregroundStyle(.gray)
+
+                                            VStack(alignment: .leading, spacing: 2) {
+                                                Text(source.provider ?? "Server")
+                                                    .font(.subheadline.bold())
+                                                    .foregroundStyle(.white)
+                                                Text(source.quality ?? "1080P")
+                                                    .font(.caption2)
+                                                    .foregroundStyle(.gray)
                                             }
+
                                             Spacer()
+
+                                            Text(source.type == "direct" ? "Direct VLC" : "Web Embed")
+                                                .font(.system(size: 10, weight: .bold))
+                                                .foregroundStyle(source.type == "direct" ? .green : .orange)
+                                                .padding(.horizontal, 8)
+                                                .padding(.vertical, 4)
+                                                .background(Color.white.opacity(0.08))
+                                                .clipShape(Capsule())
+
                                             Image(systemName: "play.circle.fill").font(.title3).foregroundStyle(.red)
                                         }
                                         .padding(12)
@@ -617,7 +880,7 @@ struct NetflixMediaDetailSheet: View {
             }
             .sheet(isPresented: $isPlayingDirect) {
                 if let stream = selectedStream, let url = URL(string: stream.url) {
-                    NativeVideoPlayerSheet(url: url, title: media.displayTitle, headers: stream.headers ?? [:])
+                    UniversalVideoPlayerSheet(url: url, title: media.displayTitle, headers: stream.headers ?? [:])
                 }
             }
             .sheet(isPresented: $isPlayingEmbed) {
@@ -710,34 +973,39 @@ struct NetflixMediaDetailSheet: View {
     }
 }
 
-// MARK: - Native Video Player Sheet with Headers
+// MARK: - Universal Video Player Sheet (Powered by VLCKit for MKV, TS, M3U8, MP4)
 
-struct NativeVideoPlayerSheet: View {
+struct UniversalVideoPlayerSheet: View {
     let url: URL
     let title: String
     let headers: [String: String]
     @Environment(\.dismiss) private var dismiss
+
     @State private var vlcPlayer: VLCMediaPlayer? = nil
+    @State private var isPlaying = true
 
     var body: some View {
         NavigationStack {
-            VLCPlayerContainerView(url: url, headers: headers, player: $vlcPlayer)
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .background(Color.black.ignoresSafeArea())
-                .navigationTitle(title)
-                .navigationBarTitleDisplayMode(.inline)
-                .toolbar {
-                    ToolbarItem(placement: .navigationBarTrailing) {
-                        Button("Done") {
-                            vlcPlayer?.stop()
-                            dismiss()
-                        }
+            VStack(spacing: 0) {
+                VLCPlayerView(url: url, headers: headers, player: $vlcPlayer)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .background(Color.black.ignoresSafeArea())
+            }
+            .navigationTitle(title)
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    Button("Done") {
+                        vlcPlayer?.stop()
+                        dismiss()
                     }
+                    .foregroundStyle(.white)
                 }
-                .onDisappear {
-                    vlcPlayer?.stop()
-                    vlcPlayer = nil
-                }
+            }
+            .onDisappear {
+                vlcPlayer?.stop()
+                vlcPlayer = nil
+            }
         }
     }
 }
@@ -759,91 +1027,9 @@ struct WebPlayerSheet: View {
                 .toolbar {
                     ToolbarItem(placement: .navigationBarTrailing) {
                         Button("Done") { dismiss() }
+                            .foregroundStyle(.white)
                     }
                 }
-        }
-    }
-}
-
-// MARK: - Live TV Netflix View
-
-struct LiveTVNetflixView: View {
-    @ObservedObject var viewModel: MainViewModel
-
-    private let columns = [
-        GridItem(.adaptive(minimum: 105), spacing: 14)
-    ]
-
-    var body: some View {
-        NavigationStack {
-            VStack(spacing: 0) {
-                // Frosted Glass Category Filter Bar
-                ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: 8) {
-                        ForEach(viewModel.availableGroups, id: \.self) { group in
-                            Button {
-                                viewModel.selectedCategory = group
-                            } label: {
-                                Text(group)
-                                    .font(.subheadline.bold())
-                                    .padding(.horizontal, 14)
-                                    .padding(.vertical, 7)
-                                    .background(viewModel.selectedCategory == group ? Color.red : Color.white.opacity(0.12))
-                                    .foregroundStyle(.white)
-                                    .clipShape(Capsule())
-                            }
-                        }
-                    }
-                    .padding(.horizontal)
-                    .padding(.vertical, 8)
-                }
-
-                if viewModel.isLoading && viewModel.allChannels.isEmpty {
-                    Spacer()
-                    ProgressView("Loading StreamBD Live TV Channels…").foregroundStyle(.white)
-                    Spacer()
-                } else {
-                    ScrollView {
-                        LazyVGrid(columns: columns, spacing: 14) {
-                            ForEach(viewModel.filteredChannels) { channel in
-                                Button {
-                                    viewModel.activeChannel = channel
-                                } label: {
-                                    VStack(spacing: 8) {
-                                        AsyncImage(url: URL(string: channel.logo)) { phase in
-                                            if let image = phase.image {
-                                                image.resizable().scaledToFit()
-                                            } else {
-                                                Image(systemName: "tv.fill").font(.title2).foregroundStyle(.red)
-                                            }
-                                        }
-                                        .frame(height: 50)
-                                        .padding(4)
-
-                                        Text(channel.name)
-                                            .font(.caption.bold())
-                                            .lineLimit(2)
-                                            .multilineTextAlignment(.center)
-                                            .foregroundStyle(.white)
-                                    }
-                                    .frame(maxWidth: .infinity)
-                                    .padding(10)
-                                    .liquidGlass(cornerRadius: 12, opacity: 0.35)
-                                }
-                                .buttonStyle(.plain)
-                            }
-                        }
-                        .padding()
-                        .padding(.bottom, 80)
-                    }
-                }
-            }
-            .background(Color.black.ignoresSafeArea())
-            .navigationTitle("Live TV Channels")
-            .searchable(text: $viewModel.searchQuery, prompt: "Search 130+ channels…")
-            .sheet(item: $viewModel.activeChannel) { ch in
-                StreamPlayerSheet(channel: ch)
-            }
         }
     }
 }
@@ -956,9 +1142,9 @@ struct NetflixSearchView: View {
                         .padding(.horizontal)
                     }
 
-                    if !liveVM.filteredChannels.isEmpty && !vodVM.searchQuery.isEmpty {
+                    if !liveVM.filteredGlobalChannels.isEmpty && !vodVM.searchQuery.isEmpty {
                         Text("Live Channels").font(.headline).foregroundStyle(.white).padding(.horizontal)
-                        ForEach(liveVM.filteredChannels.prefix(8)) { ch in
+                        ForEach(liveVM.filteredGlobalChannels.prefix(8)) { ch in
                             Button {
                                 liveVM.activeChannel = ch
                             } label: {
