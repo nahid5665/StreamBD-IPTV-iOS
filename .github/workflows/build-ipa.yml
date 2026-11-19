@@ -42,44 +42,46 @@ jobs:
         run: |
           mkdir -p Payload
           cp -r build/Build/Products/Release-iphoneos/Eentertainment.app Payload/
-          zip -r9 Eentertainment-v5.3-iOS.ipa Payload
+          zip -r9 Eentertainment-v5.4-iOS.ipa Payload
 
       - name: Upload Unsigned IPA Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: Eentertainment-v5.3-iOS-IPA
-          path: Eentertainment-v5.3-iOS.ipa
+          name: Eentertainment-v5.4-iOS-IPA
+          path: Eentertainment-v5.4-iOS.ipa
           if-no-files-found: error
 
       - name: Publish Direct IPA to GitHub Releases
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v5.3.0-eentertainment
-          name: "Eentertainment v5.3.0 — Apple Liquid Glass + 44 Playlists + 24 Addons"
+          tag_name: v5.4.0-eentertainment
+          name: "Eentertainment v5.4.0 — Fullscreen VLC Player & Dynamic Addons"
           body: |
-            ### Eentertainment v5.3.0
+            ### Eentertainment v5.4.0
 
-            🎬 **Complete Streaming App — Liquid Glass Apple Design**
+            🎬 **VLC Fullscreen Video Player + Dynamic Addons + FTP Token Engine**
 
-            #### What's New in v5.3
-            - **New App Name**: Eentertainment (renamed from StreamBD IPTV)
-            - **Apple Liquid Glass UI**: Authentic iOS-style blur, spring physics, and fluid motion
-            - **Spring Animations**: Interactive press states with `.interactiveSpring()` physics
-            - **Tactile Feedback**: ScaleButtonStyle with haptic press response
-            - **Ambient Glow Effects**: Colored backdrop blur halos behind cards
-
-            #### Core Features
-            - **Universal VLC Engine**: Hardware-accelerated MKV, M3U8, TS, MP4, FLV, AVI playback
-            - **44 Live IPTV Playlists**: Bangla TV, Sports, BDIX FTP, Indian TV, OTT, International
-            - **24 Movie & Series Addons**: CTG Movies, Cineplex BD, RoarZone, 11Plus, Net Mirror, VixSrc, PPCine, MovieBox, and more
-            - **Auto Token Refresh**: 2-hour loop for PlusBox, Jio TV, Toffee, Oxoo portals
-            - **Smart Addon Filtering**: Only shows addons that actually have the selected movie/series
-            - **TMDB Integration**: Trending movies, Bangla films, Bollywood, top-rated, search
-
-            #### Install
-            - **AltStore / SideStore / LiveContainer**: Direct IPA install
-            - **TrollStore**: Sign and install directly
-            - **Sideloadly**: Drag `.ipa` and sideload
-          files: Eentertainment-v5.3-iOS.ipa
+            #### What's New in v5.4
+            - **Native True Fullscreen Video Player**:
+              - Dedicated Fullscreen HUD controls with auto-fade timer (4s)
+              - Aspect Ratio toggle (Fit, Fill, 16:9, 4:3)
+              - Scrub slider with exact timestamp seeking
+              - 10-second skip forward & backward
+              - One-tap fullscreen expansion for both Live TV and VOD Movies/Series
+            - **Strict Dynamic Addon Filtering**:
+              - Removed all fake/dummy static fallbacks (no more non-working RoarZone, 11plus, NetMirror, MultiEmbed clutter)
+              - Addons are now verified dynamically in real time: only addons that actually possess the movie will appear
+              - CTG Movies (BDIX Next.js RSC payload extractor)
+              - CineplexBD (BDIX API v2)
+              - RoarZone (Emby public authentication & M3U8 stream)
+              - VixSrc HD (TMDB resolver)
+            - **Enhanced FTP Token Engine**:
+              - PlusBox on-demand channel token resolution (no more 40s freezes or 403 Forbidden errors)
+              - Proper LibVLC HTTP header injection (`:http-custom-headers` with `Cookie`, `Origin`, and `Referer`)
+              - Fast native parsing for JS playlists
+            - **Apple Liquid Glass Interface**:
+              - iOS spring physics with `ScaleButtonStyle`
+              - Fluid blurred depth and ambient halos
+          files: Eentertainment-v5.4-iOS.ipa
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
