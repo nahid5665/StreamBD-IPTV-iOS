@@ -1,6 +1,7 @@
 import Foundation
 
-struct EmbeddedPlaylist: Hashable {
+struct EmbeddedPlaylist: Hashable, Identifiable {
+    var id: String { name }
     let name: String
     let url: String
     let logo: String
@@ -9,7 +10,7 @@ struct EmbeddedPlaylist: Hashable {
 
 enum AppConfig {
     static let appName = "StreamBD IPTV"
-    static let appVersion = "v5.0"
+    static let appVersion = "v5.2"
 
     // Native AES-128-CBC credentials
     static let nativeAesKey = "X3#yS@6k~u&hr$0z"
