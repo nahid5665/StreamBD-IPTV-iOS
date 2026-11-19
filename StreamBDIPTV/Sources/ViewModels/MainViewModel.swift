@@ -39,21 +39,30 @@ final class MainViewModel: ObservableObject {
     }
 
     init() {
-        // Start background token refresh on init
         Task {
             await TokenRefreshManager.shared.refreshAllTokens()
         }
     }
 
-    /// Preloads essential playlists (AKASH GO, Toffee, FanCode, Cineplex)
+    /// Preloads essential playlists (StreamBD IPTV & AKASH GO)
     func loadInitialPlaylists() async {
         guard allChannels.isEmpty else { return }
         isLoading = true
 
-        // Load AKASH GO as the default primary channels
+        // 1. First load the official StreamBD IPTV (170 verified channels)
+        if let sbd = playlists.first(where: { $0.name == "StreamBD IPTV" }) {
+            let sbdChannels = await loadChannels(for: sbd)
+            if !sbdChannels.isEmpty {
+                self.allChannels = sbdChannels
+            }
+        }
+
+        // 2. Also load AKASH GO as secondary fallback
         if let akash = playlists.first(where: { $0.name == "AKASH GO" }) {
-            let channels = await loadChannels(for: akash)
-            self.allChannels = channels
+            let akashChannels = await loadChannels(for: akash)
+            if self.allChannels.isEmpty {
+                self.allChannels = akashChannels
+            }
         }
 
         isLoading = false
@@ -77,7 +86,7 @@ final class MainViewModel: ObservableObject {
         return channels
     }
 
-    /// Fetches and parses playlist content with token injection
+    /// Fetches and parses playlist content with token injection and JSON/M3U auto-detection
     static func fetchPlaylistChannels(playlist: EmbeddedPlaylist) async -> [Channel] {
         let urlStr = playlist.url
 
@@ -91,13 +100,51 @@ final class MainViewModel: ObservableObject {
 
         let trimmed = rawContent.trimmingCharacters(in: .whitespacesAndNewlines)
 
-        // Handle JS Playlists
+        // 1. Detect JSON-based channel arrays (StreamBD IPTV Official 170 channels API)
+        if trimmed.hasPrefix("[") && (trimmed.contains("\"sources\"") || trimmed.contains("\"stream_url\"") || trimmed.contains("\"channel_no\"")) {
+            return parseJsonChannels(trimmed, defaultGroup: playlist.name)
+        }
+
+        // 2. Handle JS Playlists
         if trimmed.hasPrefix("// JS PLAYLIST") || trimmed.hasPrefix("// BASE_URL=") || trimmed.contains("generatePlaylist()") || trimmed.contains("generatePlusBoxPlaylist()") {
             let m3u = await JSRunner.shared.executePlaylistScript(trimmed)
             return M3UParser.parsePlaylist(m3u, defaultGroup: playlist.name)
         }
 
+        // 3. Handle standard M3U / M3U8 playlists
         return M3UParser.parsePlaylist(trimmed, defaultGroup: playlist.name)
+    }
+
+    /// Parses StreamBD JSON channel arrays with multi-server sources
+    static func parseJsonChannels(_ jsonStr: String, defaultGroup: String) -> [Channel] {
+        guard let data = jsonStr.data(using: .utf8),
+              let arr = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]] else {
+            return []
+        }
+        var channels: [Channel] = []
+        for item in arr {
+            let name = (item["name"] as? String) ?? (item["title"] as? String) ?? "Channel"
+            let group = (item["group-title"] as? String) ?? (item["category"] as? String) ?? defaultGroup
+            let logo = (item["tvg-logo"] as? String) ?? (item["logo"] as? String) ?? ""
+            var sources: [String: String] = [:]
+            if let s = item["sources"] as? [String: String] {
+                sources = s
+            }
+            let directUrl = (item["stream_url"] as? String) ?? (item["url"] as? String) ?? (item["link"] as? String) ?? sources.values.first ?? ""
+            if !directUrl.isEmpty {
+                if sources.isEmpty {
+                    sources["Default"] = directUrl
+                }
+                channels.append(Channel(
+                    name: name,
+                    url: directUrl,
+                    logo: logo,
+                    group: group,
+                    sources: sources
+                ))
+            }
+        }
+        return channels
     }
 
     static func fetchMagicProxyChannels(proxyUrl: String, defaultGroup: String) async -> [Channel] {
