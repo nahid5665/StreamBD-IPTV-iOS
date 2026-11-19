@@ -82,9 +82,37 @@ final class TokenRefreshManager: ObservableObject {
     }
 
     /// Injects fresh tokens and headers into a stream URL before playback
-    func applyLiveToken(to rawUrl: String, channel: Channel) -> (url: String, headers: [String: String]) {
+    func applyLiveToken(to rawUrl: String, channel: Channel) async -> (url: String, headers: [String: String]) {
         var finalUrl = rawUrl
         var headers = channel.httpHeaders
+
+        // PlusBox dynamic token
+        if rawUrl.contains("plusboxChannel=") || rawUrl.contains("plusbox.tv") {
+            var channelKey = ""
+            if let range = rawUrl.range(of: "plusboxChannel=([^|&\\s]+)", options: .regularExpression) {
+                let match = String(rawUrl[range])
+                channelKey = match.replacingOccurrences(of: "plusboxChannel=", with: "")
+            }
+            if channelKey.isEmpty {
+                let clean = rawUrl.components(separatedBy: "|").first ?? rawUrl
+                if let u = URL(string: clean) {
+                    let comps = u.pathComponents.filter { $0 != "/" }
+                    if let first = comps.first { channelKey = first }
+                }
+            }
+            if !channelKey.isEmpty {
+                let token = await fetchPlusBoxToken(for: channelKey)
+                let baseStream = rawUrl.components(separatedBy: "|").first ?? rawUrl
+                if !token.isEmpty {
+                    finalUrl = "\(baseStream)?token=\(token)"
+                } else {
+                    finalUrl = baseStream
+                }
+                headers["User-Agent"] = AppConfig.browserUserAgent
+                headers["Referer"] = "https://backend.plusbox.tv/\(channelKey)/embed.html"
+                headers["Origin"] = "https://plusbox.tv"
+            }
+        }
 
         // Jio TV Token Replacement
         if rawUrl.contains("workers.dev") || channel.group.localizedCaseInsensitiveContains("Jio") {
