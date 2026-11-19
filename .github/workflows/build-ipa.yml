@@ -5,6 +5,9 @@ on:
   push:
     branches: [ main, master ]
 
+permissions:
+  contents: write
+
 jobs:
   build-ipa:
     runs-on: macos-15
@@ -39,11 +42,28 @@ jobs:
         run: |
           mkdir -p Payload
           cp -r build/Build/Products/Release-iphoneos/StreamBDIPTV.app Payload/
-          zip -r9 StreamBD-IPTV-v5.0-iOS.ipa Payload
+          zip -r9 StreamBD-IPTV-v5.2-iOS.ipa Payload
 
       - name: Upload Unsigned IPA Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: StreamBD-IPTV-v5.0-iOS-IPA
-          path: StreamBD-IPTV-v5.0-iOS.ipa
+          name: StreamBD-IPTV-v5.2-iOS-IPA
+          path: StreamBD-IPTV-v5.2-iOS.ipa
           if-no-files-found: error
+
+      - name: Publish Direct IPA to GitHub Releases
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v5.2.0-universal-vlc-stream
+          name: "StreamBD IPTV v5.2.0 — Universal VLC & 44 Playlists"
+          body: |
+            ### StreamBD IPTV v5.2.0 (Universal VLC + 44 Playlists + 24 Addons)
+            
+            - **Universal VLC Player Engine**: True hardware-accelerated playback for MKV, M3U8, TS, FLV, and MP4.
+            - **All 44 Playlists Categorized**: Bangla TV, Sports, BDIX FTP, Indian TV, Bangla OTT, International with channel browser.
+            - **Automatic Token Refresh**: 2-hour scheduled refresh loop + instant launch refresh for PlusBox, Jio TV, Toffee, and Oxoo portals.
+            - **Full Addon Resolution for Movies & Series**: CTG Movies FTP (BDIX), Cineplex BD (BDIX), RoarZone (BDIX), 11Plus WEB (BDIX), Net Mirror, VidSrc HD, MultiEmbed, SuperEmbed, 2Embed.
+            - **Direct .IPA Download**: Ready for LiveContainer, SideStore, AltStore, TrollStore, and Sideloadly.
+          files: StreamBD-IPTV-v5.2-iOS.ipa
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
