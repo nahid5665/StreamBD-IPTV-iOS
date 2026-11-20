@@ -74,7 +74,7 @@ final class NativeFetchBridge: NSObject, WKScriptMessageHandlerWithReply {
 
         var request = URLRequest(url: url)
         request.httpMethod = method
-        request.timeoutInterval = 8.0
+        request.timeoutInterval = 15.0
 
         for (k, v) in headers {
             request.setValue(v, forHTTPHeaderField: k)
@@ -82,6 +82,12 @@ final class NativeFetchBridge: NSObject, WKScriptMessageHandlerWithReply {
         if request.value(forHTTPHeaderField: "User-Agent") == nil {
             request.setValue(defaultUA, forHTTPHeaderField: "User-Agent")
         }
+
+        // Honor addon-supplied Cookie headers exactly (Android WebView semantics):
+        // when the addon chains cookies explicitly (e.g. cineplexbd combinedCookie),
+        // disable URLSession jar overriding; otherwise keep automatic jar handling.
+        let hasExplicitCookie = headers.keys.contains { $0.caseInsensitiveCompare("Cookie") == .orderedSame }
+        request.httpShouldHandleCookies = !hasExplicitCookie
         if let bodyStr, !bodyStr.isEmpty, method != "GET" && method != "HEAD" {
             request.httpBody = bodyStr.data(using: .utf8)
         }
@@ -101,6 +107,20 @@ final class NativeFetchBridge: NSObject, WKScriptMessageHandlerWithReply {
                     }
                 }
 
+                // Guarantee `set-cookie` visibility for addon cookie-chaining.
+                // URLSession folds Set-Cookie into the shared jar and may omit it
+                // from allHeaderFields; the jar holds the authoritative clean
+                // name=value pairs for this URL, so prefer it over the raw header.
+                let jarCookies = HTTPCookieStorage.shared.cookies(for: url)
+                let jarString = jarCookies.map { "\($0.name)=\($0.value)" }.joined(separator: "; ")
+                if !jarString.isEmpty {
+                    respHeaders["set-cookie"] = jarString
+                }
+
+                if AppConfig.debugAddonLogging {
+                    print("[NativeFetchBridge] \(method) \(urlString) -> \(statusCode) (bytes: \(data.count))")
+                }
+
                 let bodyText = String(data: data, encoding: .utf8)
                     ?? String(data: data, encoding: .isoLatin1)
                     ?? ""
@@ -115,6 +135,9 @@ final class NativeFetchBridge: NSObject, WKScriptMessageHandlerWithReply {
                     replyHandler(resultDict, nil)
                 }
             } catch {
+                if AppConfig.debugAddonLogging {
+                    print("[NativeFetchBridge] \(method) \(urlString) FAILED: \(error.localizedDescription)")
+                }
                 let errorDict: [String: Any] = [
                     "status": 0,
                     "url": urlString,
@@ -144,8 +167,11 @@ private final class HeadlessJSInstance: NSObject, WKNavigationDelegate {
     func setup(fetchBridge: NativeFetchBridge) async {
         self.bridge = fetchBridge
         let config = WKWebViewConfiguration()
+        config.websiteDataStore = .default() // persistent jar shared across headless instances
         let ucc = WKUserContentController()
-        ucc.addScriptMessageHandler(fetchBridge, contentWorld: .page, name: "nativeFetch")
+        // Must use the WithReply registration: the JS side awaits postMessage(),
+        // which only resolves when a WKScriptMessageHandlerWithReply is registered.
+        ucc.addScriptMessageHandlerWithReply(fetchBridge, contentWorld: .page, name: "nativeFetch")
         config.userContentController = ucc
 
         let wv = WKWebView(frame: .zero, configuration: config)
@@ -276,7 +302,7 @@ final class JSVODAddonRunner {
             limiter.release()
         }
 
-        return try await withTimeout(seconds: 10.0) {
+        return try await withTimeout(seconds: 25.0) {
             return try await self.executePlugin(script: pluginScript, addon: addon, context: context)
         }
     }
@@ -557,6 +583,66 @@ final class JSVODAddonRunner {
             let result = try await group.next()!
             group.cancelAll()
             return result
+        }
+    }
+}
+
+// MARK: - Site Prewarm (Cloudflare / Session-Challenge Bypass)
+/// APK-parity for the `doBypass` flow: loads the provider's homepage in a hidden
+/// persistent WKWebView so any JS challenge executes in a real browser context,
+/// then mirrors the resulting cookies into HTTPCookieStorage.shared, where the
+/// nativeFetch bridge (URLSession) picks them up automatically.
+@MainActor
+final class SitePrewarmer {
+    static let shared = SitePrewarmer()
+
+    private var prewarmedOrigins: Set<String> = []
+    private var inFlight: [String: Task<Void, Never>] = [:]
+
+    private init() {}
+
+    func prewarm(origin: String) async {
+        let cleanOrigin = origin.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        guard !cleanOrigin.isEmpty, cleanOrigin.hasPrefix("http"),
+              let url = URL(string: cleanOrigin) else { return }
+
+        // One attempt per session per origin (success or not).
+        guard !prewarmedOrigins.contains(cleanOrigin) else { return }
+        prewarmedOrigins.insert(cleanOrigin)
+
+        // Coalesce concurrent prewarms for the same origin.
+        if let existing = inFlight[cleanOrigin] {
+            _ = await existing.value
+            return
+        }
+        let task = Task { await runPrewarm(url: url, origin: cleanOrigin) }
+        inFlight[cleanOrigin] = task
+        _ = await task.value
+        inFlight[cleanOrigin] = nil
+    }
+
+    private func runPrewarm(url: URL, origin: String) async {
+        let config = WKWebViewConfiguration()
+        config.websiteDataStore = .default() // persistent jar
+        let wv = WKWebView(frame: CGRect(x: 0, y: 0, width: 390, height: 844), configuration: config)
+        defer { wv.stopLoading() }
+
+        if AppConfig.debugAddonLogging {
+            print("[SitePrewarmer] warming \(origin)")
+        }
+        _ = wv.load(URLRequest(url: url))
+        // Let the page (and any challenge JS / redirects) settle before mirroring.
+        try? await Task.sleep(nanoseconds: 6_000_000_000)
+
+        let store = wv.configuration.websiteDataStore.httpCookieStore
+        let cookies: [HTTPCookie] = await withCheckedContinuation { continuation in
+            store.getAllCookies { continuation.resume(returning: $0) }
+        }
+        for c in cookies {
+            HTTPCookieStorage.shared.setCookie(c)
+        }
+        if AppConfig.debugAddonLogging {
+            print("[SitePrewarmer] \(origin): mirrored \(cookies.count) cookies into URLSession jar")
         }
     }
 }
