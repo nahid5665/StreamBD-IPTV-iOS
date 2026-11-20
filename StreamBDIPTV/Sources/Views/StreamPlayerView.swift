@@ -182,24 +182,13 @@ struct VLCPlayerView: UIViewRepresentable {
         media.addOption(":network-caching=3000")
         media.addOption(":clock-jitter=0")
         media.addOption(":clock-synchro=0")
+        media.addOption(":http-reconnect=true")
 
-        if let ua = headers["User-Agent"] {
-            media.addOption(":http-user-agent=\(ua)")
-        } else {
-            media.addOption(":http-user-agent=\(AppConfig.defaultUserAgent)")
-        }
+        let ua = headers["User-Agent"] ?? headers["user-agent"] ?? AppConfig.defaultUserAgent
+        media.addOption(":http-user-agent=\(ua)")
 
-        if let ref = headers["Referer"] {
+        if let ref = headers["Referer"] ?? headers["referer"] {
             media.addOption(":http-referrer=\(ref)")
-        }
-
-        var customHeaderStrings: [String] = []
-        for (k, v) in headers where k != "User-Agent" && k != "Referer" {
-            customHeaderStrings.append("\(k): \(v)")
-        }
-        if !customHeaderStrings.isEmpty {
-            let joined = customHeaderStrings.joined(separator: "\r\n")
-            media.addOption(":http-custom-headers=\(joined)")
         }
 
         player.media = media
@@ -209,6 +198,11 @@ struct VLCPlayerView: UIViewRepresentable {
 // MARK: - Universal Fullscreen Player View (Dual-Engine AVPlayer + VLCKit)
 
 struct UniversalFullScreenPlayerView: View {
+    enum PlayerEngine: String, CaseIterable {
+        case avPlayer = "AVPlayer"
+        case vlc = "VLC"
+    }
+
     let url: URL
     let title: String
     let subtitle: String?
@@ -218,9 +212,11 @@ struct UniversalFullScreenPlayerView: View {
     @Environment(\.dismiss) private var dismiss
 
     // Player instances
+    @State private var currentEngine: PlayerEngine = .avPlayer
     @State private var avPlayer: AVPlayer? = nil
     @State private var vlcPlayer: VLCMediaPlayer? = nil
     @State private var timeObserverToken: Any? = nil
+    @State private var playerItemStatusObserver: NSKeyValueObservation? = nil
 
     // State controls
     @State private var isPlaying: Bool = true
@@ -232,6 +228,8 @@ struct UniversalFullScreenPlayerView: View {
     @State private var aspectRatioIndex: Int = 0
     @State private var hideControlsTimer: Timer? = nil
     @State private var isBuffering: Bool = true
+    @State private var errorMessage: String? = nil
+    @State private var statusToast: String? = nil
 
     private var shouldUseVLC: Bool {
         let lower = url.absoluteString.lowercased()
@@ -250,7 +248,7 @@ struct UniversalFullScreenPlayerView: View {
             Color.black.ignoresSafeArea()
 
             // Video Canvas: AVPlayer (MP4/HLS) or VLC (TS/MKV)
-            if !shouldUseVLC {
+            if currentEngine == .avPlayer {
                 if let p = avPlayer {
                     AVPlayerViewRepresentable(
                         player: p,
@@ -267,6 +265,13 @@ struct UniversalFullScreenPlayerView: View {
                     onStateChanged: { state in
                         isPlaying = (state == .playing)
                         isBuffering = (state == .buffering || state == .opening)
+                        if state == .error {
+                            isPlaying = false
+                            isBuffering = false
+                            errorMessage = "VLC failed to open or decode stream. Server might be offline or stream format unsupported."
+                        } else if state == .playing {
+                            errorMessage = nil
+                        }
                     },
                     onTimeChanged: { curr, total in
                         guard !isScrubbing else { return }
@@ -282,34 +287,126 @@ struct UniversalFullScreenPlayerView: View {
             }
 
             // Buffering Spinner
-            if isBuffering {
+            if isBuffering && errorMessage == nil {
                 ProgressView()
                     .tint(.white)
                     .scaleEffect(1.5)
             }
 
-            // Permanent Top-Left Frosted Close Button (ALWAYS VISIBLE & ACCESSIBLE)
+            // Error Overlay with Switch Engine & Retry Options
+            if let err = errorMessage {
+                VStack(spacing: 14) {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .font(.system(size: 38))
+                        .foregroundStyle(.yellow)
+
+                    Text("Playback Error")
+                        .font(.headline.bold())
+                        .foregroundStyle(.white)
+
+                    Text(err)
+                        .font(.caption)
+                        .foregroundStyle(.white.opacity(0.85))
+                        .multilineTextAlignment(.center)
+                        .padding(.horizontal, 16)
+
+                    HStack(spacing: 12) {
+                        Button {
+                            switchEngine(to: currentEngine == .avPlayer ? .vlc : .avPlayer)
+                        } label: {
+                            Text("Switch to \(currentEngine == .avPlayer ? "VLC" : "AVPlayer")")
+                                .font(.caption.bold())
+                                .foregroundStyle(.white)
+                                .padding(.horizontal, 14)
+                                .padding(.vertical, 8)
+                                .background(Color.blue)
+                                .clipShape(Capsule())
+                        }
+
+                        Button {
+                            setupPlayer()
+                        } label: {
+                            Text("Retry")
+                                .font(.caption.bold())
+                                .foregroundStyle(.white)
+                                .padding(.horizontal, 14)
+                                .padding(.vertical, 8)
+                                .background(Color.white.opacity(0.2))
+                                .clipShape(Capsule())
+                        }
+
+                        Button {
+                            stopAndDismiss()
+                        } label: {
+                            Text("Close")
+                                .font(.caption.bold())
+                                .foregroundStyle(.white)
+                                .padding(.horizontal, 14)
+                                .padding(.vertical, 8)
+                                .background(Color.red.opacity(0.6))
+                                .clipShape(Capsule())
+                        }
+                    }
+                }
+                .padding(20)
+                .background(.ultraThinMaterial)
+                .background(Color.black.opacity(0.85))
+                .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+                .padding(.horizontal, 24)
+                .zIndex(150)
+            }
+
+            // Status Toast Pill
+            if let status = statusToast {
+                VStack {
+                    Spacer().frame(height: 70)
+                    Text(status)
+                        .font(.caption2.bold())
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 6)
+                        .background(.ultraThinMaterial)
+                        .background(Color.orange.opacity(0.85))
+                        .clipShape(Capsule())
+                    Spacer()
+                }
+                .transition(.move(edge: .top).combined(with: .opacity))
+                .onAppear {
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 4.0) {
+                        withAnimation { statusToast = nil }
+                    }
+                }
+                .zIndex(160)
+            }
+
+            // Permanent Top-Left Frosted Close/Back Button (ALWAYS VISIBLE & ACCESSIBLE)
             VStack {
                 HStack {
                     Button {
                         stopAndDismiss()
                     } label: {
-                        Image(systemName: "xmark")
-                            .font(.system(size: 16, weight: .bold))
-                            .foregroundStyle(.white)
-                            .padding(12)
-                            .background(.ultraThinMaterial)
-                            .background(Color.black.opacity(0.45))
-                            .clipShape(Circle())
+                        HStack(spacing: 5) {
+                            Image(systemName: "chevron.left")
+                                .font(.system(size: 15, weight: .bold))
+                            Text("Back")
+                                .font(.subheadline.weight(.semibold))
+                        }
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 8)
+                        .background(.ultraThinMaterial)
+                        .background(Color.black.opacity(0.6))
+                        .clipShape(Capsule())
+                        .shadow(color: .black.opacity(0.4), radius: 6, x: 0, y: 2)
                     }
                     .padding(.leading, 18)
-                    .padding(.top, 12)
+                    .padding(.top, 46)
 
                     Spacer()
                 }
                 Spacer()
             }
-            .zIndex(100)
+            .zIndex(200)
 
             // Complete Interactive HUD Controls Overlay
             if showControls {
@@ -326,6 +423,7 @@ struct UniversalFullScreenPlayerView: View {
                 }
         )
         .onAppear {
+            currentEngine = shouldUseVLC ? .vlc : .avPlayer
             setupPlayer()
             resetHideTimer()
         }
@@ -338,9 +436,9 @@ struct UniversalFullScreenPlayerView: View {
     private var hudControlsOverlay: some View {
         VStack {
             // Top Bar
-            HStack(spacing: 14) {
-                // Spacing for permanent close button
-                Spacer().frame(width: 44)
+            HStack(spacing: 12) {
+                // Spacing for permanent Back button
+                Spacer().frame(width: 80)
 
                 VStack(alignment: .leading, spacing: 2) {
                     Text(title)
@@ -351,10 +449,29 @@ struct UniversalFullScreenPlayerView: View {
                         Text(subtitle)
                             .font(.caption)
                             .foregroundStyle(.white.opacity(0.75))
+                            .lineLimit(1)
                     }
                 }
 
                 Spacer()
+
+                // Engine Switch Button (AVPlayer / VLC)
+                Button {
+                    switchEngine(to: currentEngine == .avPlayer ? .vlc : .avPlayer)
+                } label: {
+                    HStack(spacing: 4) {
+                        Image(systemName: currentEngine == .avPlayer ? "applelogo" : "cone.fill")
+                            .font(.system(size: 11, weight: .bold))
+                        Text(currentEngine.rawValue)
+                            .font(.caption2.bold())
+                    }
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 6)
+                    .background(.ultraThinMaterial)
+                    .background(currentEngine == .avPlayer ? Color.blue.opacity(0.4) : Color.orange.opacity(0.4))
+                    .clipShape(Capsule())
+                }
 
                 // Aspect Ratio Selector
                 Button {
@@ -462,37 +579,85 @@ struct UniversalFullScreenPlayerView: View {
     // MARK: - Player Lifecycle & Actions
 
     private func setupPlayer() {
-        if !shouldUseVLC {
-            // Setup Native AVPlayer for MP4 & HLS
-            var assetOptions: [String: Any] = [:]
-            if !headers.isEmpty {
-                assetOptions["AVURLAssetHTTPHeaderFieldsKey"] = headers
-            }
-            let asset = AVURLAsset(url: url, options: assetOptions)
-            let item = AVPlayerItem(asset: asset)
-            let player = AVPlayer(playerItem: item)
-            self.avPlayer = player
+        stopPlayback()
+        errorMessage = nil
 
-            // Periodic time observer for scrubbing bar
-            let interval = CMTime(seconds: 0.5, preferredTimescale: CMTimeScale(NSEC_PER_SEC))
-            timeObserverToken = player.addPeriodicTimeObserver(forInterval: interval, queue: .main) { time in
-                guard !isScrubbing else { return }
-                let currentSec = CMTimeGetSeconds(time)
-                if let duration = player.currentItem?.duration, duration.isValid, !duration.isIndefinite {
-                    let totalSec = CMTimeGetSeconds(duration)
-                    if totalSec > 0 {
-                        progressValue = currentSec / totalSec
-                        totalTimeText = formatTime(seconds: totalSec)
-                    }
-                }
-                currentTimeText = formatTime(seconds: currentSec)
-                isBuffering = (player.timeControlStatus == .waitingToPlayAtSpecifiedRate)
-                isPlaying = (player.timeControlStatus == .playing)
-            }
-
-            player.play()
+        if currentEngine == .avPlayer {
+            setupAVPlayer()
+        } else {
+            isBuffering = true
             isPlaying = true
         }
+    }
+
+    private func setupAVPlayer() {
+        var assetOptions: [String: Any] = [:]
+        if !headers.isEmpty {
+            assetOptions["AVURLAssetHTTPHeaderFieldsKey"] = headers
+        }
+        let asset = AVURLAsset(url: url, options: assetOptions)
+        let item = AVPlayerItem(asset: asset)
+
+        playerItemStatusObserver = item.observe(\.status, options: [.new]) { observedItem, _ in
+            DispatchQueue.main.async {
+                if observedItem.status == .failed {
+                    let err = observedItem.error?.localizedDescription ?? "AVPlayer decoding failed"
+                    print("[Player] AVPlayer failed: \(err). Falling back to VLC...")
+                    self.fallbackToVLC(reason: err)
+                } else if observedItem.status == .readyToPlay {
+                    self.isBuffering = false
+                    self.errorMessage = nil
+                }
+            }
+        }
+
+        let player = AVPlayer(playerItem: item)
+        self.avPlayer = player
+
+        let interval = CMTime(seconds: 0.5, preferredTimescale: CMTimeScale(NSEC_PER_SEC))
+        timeObserverToken = player.addPeriodicTimeObserver(forInterval: interval, queue: .main) { time in
+            guard !isScrubbing else { return }
+            let currentSec = CMTimeGetSeconds(time)
+            if let duration = player.currentItem?.duration, duration.isValid, !duration.isIndefinite {
+                let totalSec = CMTimeGetSeconds(duration)
+                if totalSec > 0 {
+                    progressValue = currentSec / totalSec
+                    totalTimeText = formatTime(seconds: totalSec)
+                }
+            }
+            currentTimeText = formatTime(seconds: currentSec)
+            isBuffering = (player.timeControlStatus == .waitingToPlayAtSpecifiedRate)
+            isPlaying = (player.timeControlStatus == .playing)
+        }
+
+        player.play()
+        isPlaying = true
+    }
+
+    private func fallbackToVLC(reason: String) {
+        playerItemStatusObserver?.invalidate()
+        playerItemStatusObserver = nil
+        if let p = avPlayer {
+            if let token = timeObserverToken {
+                p.removeTimeObserver(token)
+                timeObserverToken = nil
+            }
+            p.pause()
+            self.avPlayer = nil
+        }
+        withAnimation(.easeInOut) {
+            currentEngine = .vlc
+            statusToast = "Fallback to VLC (AVPlayer error: \(reason))"
+        }
+    }
+
+    private func switchEngine(to engine: PlayerEngine) {
+        guard engine != currentEngine else { return }
+        stopPlayback()
+        withAnimation(.easeInOut) {
+            currentEngine = engine
+        }
+        setupPlayer()
     }
 
     private func toggleControls() {
@@ -546,6 +711,8 @@ struct UniversalFullScreenPlayerView: View {
 
     private func stopPlayback() {
         hideControlsTimer?.invalidate()
+        playerItemStatusObserver?.invalidate()
+        playerItemStatusObserver = nil
         if let p = avPlayer {
             if let token = timeObserverToken {
                 p.removeTimeObserver(token)
