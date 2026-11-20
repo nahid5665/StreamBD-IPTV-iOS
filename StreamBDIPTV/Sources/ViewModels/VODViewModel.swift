@@ -114,10 +114,6 @@ final class VODViewModel: ObservableObject {
             TmdbResponse<TmdbMedia>.self,
             from: "\(base)/movie/top_rated?api_key=\(key)&language=en-US"
         )
-        async let remoteAddons: [Addon]? = try? NetworkManager.shared.fetchDecodable(
-            [Addon].self,
-            from: AppConfig.addonRegistryURL
-        )
 
         let loadedMovies = (await tm)?.results ?? []
         let loadedTV = (await tv)?.results ?? []
@@ -127,13 +123,9 @@ final class VODViewModel: ObservableObject {
         self.bollywoodMovies = (await hi)?.results ?? []
         self.top10Media = Array(((await top)?.results ?? loadedMovies).prefix(10))
 
-        if let fetchedAddons = await remoteAddons, !fetchedAddons.isEmpty {
-            for fa in fetchedAddons {
-                if !self.addons.contains(where: { $0.id == fa.id }) {
-                    self.addons.append(fa)
-                }
-            }
-        }
+        // NOTE: the remote addon registry merge was intentionally removed —
+        // the addon list is exactly the 3 bundled resolvers plus whatever the
+        // user adds manually in Settings (stored in UserDefaults).
 
         if self.featuredMedia == nil {
             self.featuredMedia = loadedMovies.first ?? loadedTV.first

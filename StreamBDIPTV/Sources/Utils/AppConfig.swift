@@ -10,7 +10,7 @@ struct EmbeddedPlaylist: Hashable, Identifiable {
 
 enum AppConfig {
     static let appName = "Eentertainment"
-    static let appVersion = "v5.8.1"
+    static let appVersion = "v5.8.2"
 
     /// Verbose addon-pipeline logging (fetch bridge, scrapers, prewarm).
     /// Visible in Console.app / idevicesyslog under the app process.

@@ -42,35 +42,33 @@ jobs:
         run: |
           mkdir -p Payload
           cp -r build/Build/Products/Release-iphoneos/Eentertainment.app Payload/
-          zip -r9 Eentertainment-v5.8.1-iOS.ipa Payload
+          zip -r9 Eentertainment-v5.8.2-iOS.ipa Payload
 
       - name: Upload Unsigned IPA Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: Eentertainment-v5.8.1-iOS-IPA
-          path: Eentertainment-v5.8.1-iOS.ipa
+          name: Eentertainment-v5.8.2-iOS-IPA
+          path: Eentertainment-v5.8.2-iOS.ipa
           if-no-files-found: error
 
       - name: Publish Direct IPA to GitHub Releases
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v5.8.1-eentertainment
-          name: "Eentertainment v5.8.1 — External Player (Hand Streams to VLC App)"
+          tag_name: v5.8.2-eentertainment
+          name: "Eentertainment v5.8.2 — Remote Registry Merge Removed (Addon List Is Final)"
           body: |
-            ### Eentertainment v5.8.1
+            ### Eentertainment v5.8.2
 
-            📺 **Play streams in the real VLC app on your iPhone**
+            🧹 **The 20 extra addons are really gone now**
 
-            #### What's New in v5.8.1:
-            1. **Settings → External Player**: choose where streams play — **This App** or **VLC App**.
-               - When VLC App is selected, every resolved stream is handed to the installed VLC
-                 app via its x-callback-url scheme and starts playing there immediately.
-               - VLC detection status shown in Settings (requires the VLC app from the App Store).
-            2. **Per-stream "cone" button** in the movie page stream list: hand any individual
-               stream to VLC with one tap, regardless of the setting.
-            3. Embed streams always stay in-app (VLC can't scrape web embed pages).
-            4. Note: the URL handoff carries the stream URL + title only — custom Referer/Cookie
-               headers are not forwarded, so header-protected BDIX streams may refuse in VLC.
-          files: Eentertainment-v5.8.1-iOS.ipa
+            #### What's Fixed in v5.8.2:
+            1. **Root cause of the 23-addon list**: at startup the app was fetching the remote
+               addon registry (StreamBD_IPTV_Addon.json) and appending ALL of its addons on top
+               of the bundled ones — undoing the trim. The remote merge is removed entirely.
+            2. **Addon list is now final**: exactly the 3 bundled resolvers (Cineplex BD, CTG
+               Movies FTP, RoarZone EMBY) plus any addons you personally add in Settings
+               (.js scraper URLs or Stremio manifests). Movie pages only check those.
+            3. Combined with the 10-minute result cache from v5.7.9, repeat visits are instant.
+          files: Eentertainment-v5.8.2-iOS.ipa
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
