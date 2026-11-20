@@ -299,26 +299,97 @@ final class JSVODAddonRunner {
         if (typeof window.process === 'undefined') {
             window.process = { env: {} };
         }
-        if (typeof window.require === 'undefined') {
-            window.require = function(mod) {
-                if (mod === 'crypto-js' && typeof window.CryptoJS !== 'undefined') {
-                    return window.CryptoJS;
-                }
-                return {};
-            };
-        }
-        if (typeof window.Buffer === 'undefined') {
-            window.Buffer = {
-                from: function(str, encoding) {
-                    return {
-                        toString: function(enc) {
+
+        // Lightweight DOMParser-backed cheerio shim
+        var cheerio = {
+            load: function(htmlStr) {
+                var parser = new DOMParser();
+                var doc = parser.parseFromString(htmlStr || '', 'text/html');
+                var wrap = function(nodes) {
+                    var arr = Array.from(nodes || []);
+                    arr.text = function() { return arr.map(function(n) { return n.textContent || ''; }).join(' ').trim(); };
+                    arr.html = function() { return arr.map(function(n) { return n.innerHTML || ''; }).join(''); };
+                    arr.attr = function(name) { return arr.length > 0 ? (arr[0].getAttribute ? arr[0].getAttribute(name) : arr[0][name]) : null; };
+                    arr.each = function(fn) { arr.forEach(function(el, idx) { fn.call(el, idx, el); }); return arr; };
+                    arr.find = function(sel) {
+                        var res = [];
+                        arr.forEach(function(n) { if (n.querySelectorAll) { res.push.apply(res, n.querySelectorAll(sel)); } });
+                        return wrap(res);
+                    };
+                    arr.first = function() { return wrap(arr.slice(0, 1)); };
+                    arr.last = function() { return wrap(arr.slice(-1)); };
+                    arr.eq = function(i) { return wrap(arr.slice(i, i + 1)); };
+                    return arr;
+                };
+                var $ = function(selector) {
+                    if (!selector) return wrap([]);
+                    if (typeof selector === 'object') return wrap([selector]);
+                    try {
+                        return wrap(doc.querySelectorAll(selector));
+                    } catch(e) {
+                        return wrap([]);
+                    }
+                };
+                $.html = function() { return doc.documentElement ? doc.documentElement.outerHTML : ''; };
+                return $;
+            }
+        };
+
+        // Fetch-backed axios shim
+        var axios = {
+            get: async function(url, config) {
+                var res = await window.fetch(url, { method: 'GET', headers: config && config.headers });
+                var text = await res.text();
+                var data = text;
+                try { data = JSON.parse(text); } catch(e) {}
+                return { data: data, status: res.status, headers: res.headers, ok: res.ok };
+            },
+            post: async function(url, body, config) {
+                var res = await window.fetch(url, {
+                    method: 'POST',
+                    headers: config && config.headers,
+                    body: typeof body === 'object' ? JSON.stringify(body) : body
+                });
+                var text = await res.text();
+                var data = text;
+                try { data = JSON.parse(text); } catch(e) {}
+                return { data: data, status: res.status, headers: res.headers, ok: res.ok };
+            }
+        };
+
+        // Standard Buffer shim with proper base64 encode/decode
+        window.Buffer = {
+            from: function(data, encoding) {
+                var str = (data !== null && data !== undefined) ? String(data) : '';
+                return {
+                    toString: function(enc) {
+                        if (enc === 'base64') {
+                            try { return btoa(str); } catch(e) { return ''; }
+                        } else if (encoding === 'base64') {
                             try { return atob(str); } catch(e) { return str; }
                         }
-                    };
-                }
-            };
-        }
+                        return str;
+                    }
+                };
+            },
+            isBuffer: function() { return false; }
+        };
 
+        // Universal Module Require Shim
+        window.require = function(mod) {
+            if (mod === 'crypto-js' && typeof window.CryptoJS !== 'undefined') {
+                return window.CryptoJS;
+            }
+            if (mod === 'cheerio') {
+                return cheerio;
+            }
+            if (mod === 'axios') {
+                return axios;
+            }
+            return {};
+        };
+
+        // Native URLSession Fetch Bridge
         window.fetch = async function(input, init) {
             try {
                 var url = typeof input === 'string' ? input : (input && input.url ? input.url : '');
@@ -387,27 +458,20 @@ final class JSVODAddonRunner {
         }
 
         if (!runner) {
-            return [];
+            return { error: 'No exported stream function found' };
         }
 
-        var res;
         try {
-            res = await runner(argType, argTmdbId, argSeason, argEpisode);
-            if (!res || (Array.isArray(res) && res.length === 0)) {
-                var alt = await runner(argTmdbId, argType, argSeason, argEpisode);
-                if (alt && Array.isArray(alt) && alt.length > 0) {
-                    res = alt;
-                }
+            var res = await runner(argType, argTmdbId, argSeason, argEpisode);
+            if (res && Array.isArray(res)) {
+                return res;
+            } else if (res) {
+                return [res];
             }
-        } catch(e) {
-            try {
-                res = await runner(argTmdbId, argType, argSeason, argEpisode);
-            } catch(e2) {
-                return [];
-            }
+            return [];
+        } catch(err) {
+            return { error: String(err && err.message ? err.message : err) };
         }
-
-        return Array.isArray(res) ? res : (res ? [res] : []);
         """
 
         let args: [String: Any] = [
@@ -428,6 +492,11 @@ final class JSVODAddonRunner {
     }
 
     private func parseStreamSources(from rawResult: Any?, addon: Addon) -> [StreamSource] {
+        if let dict = rawResult as? [String: Any], let errorMsg = dict["error"] as? String {
+            print("[JSVODAddonRunner] Addon '\(addon.name)' JS runtime error: \(errorMsg)")
+            return []
+        }
+
         guard let array = rawResult as? [Any] else { return [] }
         var results: [StreamSource] = []
 
