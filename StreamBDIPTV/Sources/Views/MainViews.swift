@@ -995,7 +995,10 @@ struct NetflixMediaDetailSheet: View {
                         title: media.displayTitle,
                         subtitle: stream.provider,
                         headers: stream.headers ?? [:],
-                        isLive: false
+                        isLive: false,
+                        onClose: {
+                            isPlayingDirect = false
+                        }
                     )
                 }
             }
@@ -1103,7 +1106,10 @@ struct UniversalVideoPlayerSheet: View {
             title: title,
             subtitle: nil,
             headers: headers,
-            isLive: false
+            isLive: false,
+            onClose: {
+                dismiss()
+            }
         )
     }
 }
