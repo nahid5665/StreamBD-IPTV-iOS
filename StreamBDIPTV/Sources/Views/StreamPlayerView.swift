@@ -191,6 +191,10 @@ struct VLCPlayerView: UIViewRepresentable {
             media.addOption(":http-referrer=\(ref)")
         }
 
+        if let cookie = headers["Cookie"] ?? headers["cookie"] {
+            media.addOption(":http-cookie=\(cookie)")
+        }
+
         player.media = media
     }
 }
