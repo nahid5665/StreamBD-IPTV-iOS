@@ -129,6 +129,8 @@ struct ContentView: View {
                     EventsNetflixView()
                 case 3:
                     NetflixSearchView(vodVM: vodViewModel, liveVM: mainViewModel)
+                case 4:
+                    SettingsNetflixView(vodVM: vodViewModel, liveVM: mainViewModel)
                 default:
                     NetflixHomeView(vodVM: vodViewModel, liveVM: mainViewModel)
                 }
@@ -153,6 +155,7 @@ struct ContentView: View {
             tabButton(title: "Live TV", icon: "tv.fill", tabIndex: 1)
             tabButton(title: "Sports", icon: "sportscourt.fill", tabIndex: 2)
             tabButton(title: "Search", icon: "magnifyingglass", tabIndex: 3)
+            tabButton(title: "Settings", icon: "gearshape.fill", tabIndex: 4)
         }
         .padding(.horizontal, 10)
         .padding(.vertical, 10)
@@ -822,10 +825,10 @@ struct NetflixMediaDetailSheet: View {
     @Environment(\.dismiss) private var dismiss
 
     @State private var availableStreams: [StreamSource] = []
-    @State private var selectedStream: StreamSource? = nil
+    @State private var activePlayback: PlaybackRequest? = nil
+    @State private var playbackAlertText: String? = nil
+    @State private var showPlaybackAlert: Bool = false
     @State private var isLoadingStreams = true
-    @State private var isPlayingDirect = false
-    @State private var isPlayingEmbed = false
     @State private var selectedSeason = 1
     @State private var selectedEpisode = 1
     @State private var seasons: [TmdbSeason] = []
@@ -1040,24 +1043,26 @@ struct NetflixMediaDetailSheet: View {
             .task {
                 await loadStreams()
             }
-            .fullScreenCover(isPresented: $isPlayingDirect) {
-                if let stream = selectedStream, let url = URL(string: stream.url) {
+            .fullScreenCover(item: $activePlayback) { request in
+                if request.isEmbed {
+                    WebPlayerSheet(url: request.url, title: request.title)
+                } else {
                     UniversalFullScreenPlayerView(
-                        url: url,
-                        title: media.displayTitle,
-                        subtitle: stream.provider,
-                        headers: stream.headers ?? [:],
-                        isLive: false,
+                        url: request.url,
+                        title: request.title,
+                        subtitle: request.subtitle,
+                        headers: request.headers,
+                        isLive: request.isLive,
                         onClose: {
-                            isPlayingDirect = false
+                            activePlayback = nil
                         }
                     )
                 }
             }
-            .sheet(isPresented: $isPlayingEmbed) {
-                if let stream = selectedStream, let url = URL(string: stream.url) {
-                    WebPlayerSheet(url: url, title: media.displayTitle)
-                }
+            .alert("Cannot Play Stream", isPresented: $showPlaybackAlert) {
+                Button("OK", role: .cancel) { }
+            } message: {
+                Text(playbackAlertText ?? "Unable to play stream.")
             }
         }
     }
@@ -1135,12 +1140,20 @@ struct NetflixMediaDetailSheet: View {
     }
 
     private func playSource(_ source: StreamSource) {
-        selectedStream = source
-        if source.type == "embed" {
-            isPlayingEmbed = true
-        } else {
-            isPlayingDirect = true
+        guard let url = URL(string: source.url), !source.url.isEmpty else {
+            playbackAlertText = "Stream URL is invalid or malformed for provider: \(source.provider ?? "Unknown")"
+            showPlaybackAlert = true
+            return
         }
+        let isEmbed = (source.type == "embed")
+        activePlayback = PlaybackRequest(
+            url: url,
+            title: media.displayTitle,
+            subtitle: source.provider,
+            headers: source.headers ?? [:],
+            isLive: false,
+            isEmbed: isEmbed
+        )
     }
 }
 
@@ -1337,6 +1350,227 @@ struct NetflixSearchView: View {
                 StreamPlayerSheet(channel: ch)
             }
         }
+    }
+}
+
+// MARK: - Eentertainment Settings & Stremio Addons Management
+
+struct SettingsNetflixView: View {
+    @ObservedObject var vodVM: VODViewModel
+    @ObservedObject var liveVM: MainViewModel
+
+    @State private var newAddonName: String = ""
+    @State private var newAddonUrl: String = ""
+    @State private var addonAlert: String? = nil
+    @State private var showAddonAlert: Bool = false
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 22) {
+                    // Header
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Settings")
+                            .font(.largeTitle.bold())
+                            .foregroundStyle(.white)
+                        Text("Addons, Streams & Player Configuration")
+                            .font(.caption)
+                            .foregroundStyle(.gray)
+                    }
+                    .padding(.horizontal, 20)
+                    .padding(.top, 16)
+
+                    // Install Custom Stremio HTTP Addon Section
+                    VStack(alignment: .leading, spacing: 14) {
+                        Label("Add Stremio Addon", systemImage: "plus.circle.fill")
+                            .font(.headline)
+                            .foregroundStyle(.white)
+
+                        Text("Enter any standard Stremio manifest URL (e.g. https://.../manifest.json)")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+
+                        VStack(spacing: 12) {
+                            TextField("Addon Name (e.g. Torrentio, Cinemeta)", text: $newAddonName)
+                                .textFieldStyle(.plain)
+                                .padding(12)
+                                .background(Color.white.opacity(0.08))
+                                .clipShape(RoundedRectangle(cornerRadius: 10))
+                                .foregroundStyle(.white)
+
+                            TextField("Manifest URL (https://.../manifest.json)", text: $newAddonUrl)
+                                .textFieldStyle(.plain)
+                                .textInputAutocapitalization(.never)
+                                .autocorrectionDisabled(true)
+                                .keyboardType(.URL)
+                                .padding(12)
+                                .background(Color.white.opacity(0.08))
+                                .clipShape(RoundedRectangle(cornerRadius: 10))
+                                .foregroundStyle(.white)
+
+                            Button {
+                                addStremioAddon()
+                            } label: {
+                                HStack(spacing: 6) {
+                                    Image(systemName: "arrow.down.circle.fill")
+                                    Text("Install Stremio Addon")
+                                        .font(.subheadline.bold())
+                                }
+                                .frame(maxWidth: .infinity)
+                                .padding(.vertical, 12)
+                                .background(
+                                    LinearGradient(
+                                        colors: [Color(red: 0.35, green: 0.55, blue: 1.0), Color(red: 0.55, green: 0.25, blue: 0.95)],
+                                        startPoint: .leading,
+                                        endPoint: .trailing
+                                    )
+                                )
+                                .foregroundStyle(.white)
+                                .clipShape(RoundedRectangle(cornerRadius: 10))
+                            }
+                            .disabled(newAddonUrl.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                        }
+                        .padding(16)
+                        .liquidGlass(cornerRadius: 16, opacity: 0.5)
+
+                        // Popular Presets
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text("Popular Presets (Tap to fill)")
+                                .font(.caption.bold())
+                                .foregroundStyle(.secondary)
+
+                            ScrollView(.horizontal, showsIndicators: false) {
+                                HStack(spacing: 8) {
+                                    presetButton(title: "Torrentio HTTP", url: "https://torrentio.strem.fun/manifest.json")
+                                    presetButton(title: "Cinemeta", url: "https://v3-cinemeta.strem.io/manifest.json")
+                                    presetButton(title: "CyberFlix", url: "https://cyberflix.kodi.al/manifest.json")
+                                }
+                            }
+                        }
+                    }
+                    .padding(.horizontal, 20)
+
+                    // Active Addons List (Toggle & Manage)
+                    VStack(alignment: .leading, spacing: 12) {
+                        HStack {
+                            Label("Installed Addons", systemImage: "puzzlepiece.extension.fill")
+                                .font(.headline)
+                                .foregroundStyle(.white)
+                            Spacer()
+                            Text("\(vodVM.addons.filter { $0.enabled }.count) Active")
+                                .font(.caption.bold())
+                                .foregroundStyle(.green)
+                        }
+
+                        VStack(spacing: 8) {
+                            ForEach(vodVM.addons) { addon in
+                                HStack {
+                                    VStack(alignment: .leading, spacing: 3) {
+                                        HStack(spacing: 6) {
+                                            Text(addon.name)
+                                                .font(.subheadline.bold())
+                                                .foregroundStyle(.white)
+                                            if addon.type == "stremio" || addon.id.hasPrefix("stremio_") {
+                                                Text("Stremio")
+                                                    .font(.system(size: 9, weight: .bold))
+                                                    .foregroundStyle(.purple)
+                                                    .padding(.horizontal, 6)
+                                                    .padding(.vertical, 2)
+                                                    .background(Color.purple.opacity(0.2))
+                                                    .clipShape(Capsule())
+                                            }
+                                        }
+
+                                        Text(addon.url)
+                                            .font(.caption2)
+                                            .foregroundStyle(.secondary)
+                                            .lineLimit(1)
+                                    }
+
+                                    Spacer()
+
+                                    // Custom user addon can be deleted
+                                    if addon.id.hasPrefix("stremio_") {
+                                        Button {
+                                            vodVM.removeCustomAddon(id: addon.id)
+                                        } label: {
+                                            Image(systemName: "trash")
+                                                .font(.caption)
+                                                .foregroundStyle(.red.opacity(0.85))
+                                                .padding(6)
+                                        }
+                                    }
+
+                                    Toggle("", isOn: Binding(
+                                        get: { addon.enabled },
+                                        set: { _ in vodVM.toggleAddon(id: addon.id) }
+                                    ))
+                                    .labelsHidden()
+                                    .tint(Color(red: 0.35, green: 0.55, blue: 1.0))
+                                }
+                                .padding(12)
+                                .liquidGlass(cornerRadius: 12, opacity: 0.35)
+                            }
+                        }
+                    }
+                    .padding(.horizontal, 20)
+
+                    // App Information
+                    VStack(spacing: 6) {
+                        Text(AppConfig.appName)
+                            .font(.headline)
+                            .foregroundStyle(.white)
+                        Text("Version \(AppConfig.appVersion) — Dual-Engine Video Player")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    .frame(maxWidth: .infinity)
+                    .padding(.top, 20)
+                    .padding(.bottom, 120)
+                }
+            }
+            .background(Color.black.ignoresSafeArea())
+            .navigationTitle("Settings")
+            .navigationBarTitleDisplayMode(.inline)
+            .alert("Addon Notice", isPresented: $showAddonAlert) {
+                Button("OK", role: .cancel) { }
+            } message: {
+                Text(addonAlert ?? "")
+            }
+        }
+    }
+
+    private func presetButton(title: String, url: String) -> some View {
+        Button {
+            newAddonName = title
+            newAddonUrl = url
+        } label: {
+            Text(title)
+                .font(.caption2.bold())
+                .foregroundStyle(.white)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 7)
+                .background(Color.white.opacity(0.12))
+                .clipShape(Capsule())
+        }
+    }
+
+    private func addStremioAddon() {
+        let trimmed = newAddonUrl.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmed.hasPrefix("http://") || trimmed.hasPrefix("https://") else {
+            addonAlert = "Addon URL must begin with http:// or https://"
+            showAddonAlert = true
+            return
+        }
+
+        let manifestUrl = trimmed.hasSuffix("/manifest.json") ? trimmed : (trimmed.hasSuffix("/") ? "\(trimmed)manifest.json" : "\(trimmed)/manifest.json")
+        let name = newAddonName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "Stremio Addon" : newAddonName
+
+        vodVM.addCustomStremioAddon(name: name, url: manifestUrl)
+        newAddonName = ""
+        newAddonUrl = ""
+        addonAlert = "Installed \(name) successfully!"
+        showAddonAlert = true
     }
 }
 
