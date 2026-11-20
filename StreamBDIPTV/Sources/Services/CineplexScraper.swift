@@ -2,7 +2,7 @@ import Foundation
 
 final class CineplexScraper {
     static let shared = CineplexScraper()
-    private let baseUrl = "https://cineplexbd.net"
+    private let baseUrl = "http://cineplexbd.net"
     private let userAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
 
     private init() {}
