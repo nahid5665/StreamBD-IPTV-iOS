@@ -129,72 +129,9 @@ final class BDIXAddonScraper {
 
     // MARK: - 2. RoarZone EMBY Server Scraper (Public Authentication + HLS Master Playlist)
     private func resolveRoarZone(title: String, isTV: Bool) async -> [StreamSource] {
-        guard let authUrl = URL(string: "https://play.roarzone.net/Users/authenticatebyname") else { return [] }
-
-        var authReq = URLRequest(url: authUrl)
-        authReq.httpMethod = "POST"
-        authReq.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        authReq.setValue("MediaBrowser Client=\"iOS\", Device=\"iPhone\", DeviceId=\"Eentertainment-iOS\", Version=\"1.0.0\"", forHTTPHeaderField: "X-Emby-Authorization")
-        authReq.setValue(defaultUA, forHTTPHeaderField: "User-Agent")
-        authReq.httpBody = "{\"Username\":\"RoarZone_Guest\",\"Pw\":\"\"}".data(using: .utf8)
-        authReq.timeoutInterval = 5
-
-        guard let (authData, authResp) = try? await URLSession.shared.data(for: authReq),
-              (authResp as? HTTPURLResponse)?.statusCode == 200,
-              let authJson = try? JSONSerialization.jsonObject(with: authData) as? [String: Any],
-              let token = authJson["AccessToken"] as? String else {
-            return []
-        }
-
-        let itemType = isTV ? "Series" : "Movie"
-        guard let encodedTitle = title.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed),
-              let searchUrl = URL(string: "https://play.roarzone.net/Items?searchTerm=\(encodedTitle)&Recursive=true&IncludeItemTypes=\(itemType)&api_key=\(token)") else {
-            return []
-        }
-
-        var searchReq = URLRequest(url: searchUrl)
-        searchReq.setValue(defaultUA, forHTTPHeaderField: "User-Agent")
-        searchReq.timeoutInterval = 5
-
-        guard let (searchData, searchResp) = try? await URLSession.shared.data(for: searchReq),
-              (searchResp as? HTTPURLResponse)?.statusCode == 200,
-              let searchJson = try? JSONSerialization.jsonObject(with: searchData) as? [String: Any],
-              let items = searchJson["Items"] as? [[String: Any]], !items.isEmpty else {
-            return []
-        }
-
-        var streams: [StreamSource] = []
-        for item in items.prefix(2) {
-            guard let itemId = item["Id"] as? String ?? (item["Id"] as? Int).map(String.init) else { continue }
-            let name = item["Name"] as? String ?? title
-            let msId = "mediasource_\(itemId)"
-            let masterUrl = "https://play.roarzone.net/videos/\(itemId)/master.m3u8?api_key=\(token)&MediaSourceId=\(msId)&DeviceId=Eentertainment-iOS&VideoCodec=h264,hevc&AudioCodec=aac,mp3"
-            let directUrl = "https://play.roarzone.net/Videos/\(itemId)/stream?MediaSourceId=\(msId)&static=true&api_key=\(token)"
-
-            streams.append(StreamSource(
-                url: masterUrl,
-                quality: "HD 1080P",
-                provider: "RoarZone [EMBY] (\(name))",
-                type: "direct",
-                headers: [
-                    "User-Agent": defaultUA,
-                    "Referer": "https://play.roarzone.net/web/index.html",
-                    "Origin": "https://play.roarzone.net"
-                ]
-            ))
-            streams.append(StreamSource(
-                url: directUrl,
-                quality: "Direct Stream",
-                provider: "RoarZone [EMBY Direct] (\(name))",
-                type: "direct",
-                headers: [
-                    "User-Agent": defaultUA,
-                    "Referer": "https://play.roarzone.net/web/index.html",
-                    "Origin": "https://play.roarzone.net"
-                ]
-            ))
-        }
-        return streams
+        let dummyAddon = Addon(id: "roarzone-emby", name: "RoarZone EMBY", url: "https://play.roarzone.net", enabled: true)
+        let ctx = MediaLookupContext(tmdbId: 0, imdbId: nil, title: title, year: "", isTV: isTV, season: 1, episode: 1)
+        return (try? await AddonResolverService.shared.resolve(addon: dummyAddon, context: ctx)) ?? []
     }
 
     // MARK: - 3. VixSrc HD Stream Resolver
