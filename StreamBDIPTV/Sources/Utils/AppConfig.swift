@@ -10,7 +10,7 @@ struct EmbeddedPlaylist: Hashable, Identifiable {
 
 enum AppConfig {
     static let appName = "Eentertainment"
-    static let appVersion = "v5.5"
+    static let appVersion = "v5.6"
 
     // Native AES-128-CBC credentials
     static let nativeAesKey = "X3#yS@6k~u&hr$0z"
