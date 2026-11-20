@@ -230,3 +230,23 @@ struct TmdbEpisode: Identifiable, Codable, Hashable {
 struct TmdbSeasonDetailResponse: Codable {
     let episodes: [TmdbEpisode]?
 }
+
+struct PlaybackRequest: Identifiable, Hashable {
+    let id: UUID
+    let url: URL
+    let title: String
+    let subtitle: String?
+    let headers: [String: String]
+    let isLive: Bool
+    let isEmbed: Bool
+
+    init(id: UUID = UUID(), url: URL, title: String, subtitle: String? = nil, headers: [String: String] = [:], isLive: Bool = false, isEmbed: Bool = false) {
+        self.id = id
+        self.url = url
+        self.title = title
+        self.subtitle = subtitle
+        self.headers = headers
+        self.isLive = isLive
+        self.isEmbed = isEmbed
+    }
+}
