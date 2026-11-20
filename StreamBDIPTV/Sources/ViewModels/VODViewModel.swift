@@ -14,6 +14,14 @@ final class VODViewModel: ObservableObject {
     @Published var isLoading: Bool = false
     @Published var selectedMedia: TmdbMedia? = nil
 
+    // Live Per-Addon Resolution State
+    @Published var addonStates: [String: AddonLookupState] = [:]
+    @Published var availableStreams: [StreamSource] = []
+    @Published var isResolvingAddons: Bool = false
+
+    private var imdbIdCache: [Int: String] = [:]
+    private var activeLookupTask: Task<Void, Never>? = nil
+
     func loadCatalog() async {
         guard trendingMovies.isEmpty else { return }
         isLoading = true
@@ -76,20 +84,85 @@ final class VODViewModel: ObservableObject {
         }
     }
 
-    /// Resolves all available BDIX FTP servers + Global stream sources for a title using all 24 addons
+    /// Fetches external IMDb ID (`tt...`) from TMDB
+    func fetchExternalImdbId(tmdbId: Int, isTV: Bool) async -> String? {
+        if let cached = imdbIdCache[tmdbId] { return cached }
+        let endpoint = isTV ? "tv" : "movie"
+        let url = "\(AppConfig.tmdbBaseURL)/\(endpoint)/\(tmdbId)/external_ids?api_key=\(AppConfig.tmdbApiKey)"
+        guard let (data, resp) = try? await URLSession.shared.data(from: URL(string: url)!),
+              (resp as? HTTPURLResponse)?.statusCode == 200,
+              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let imdb = json["imdb_id"] as? String, !imdb.isEmpty else {
+            return nil
+        }
+        imdbIdCache[tmdbId] = imdb
+        return imdb
+    }
+
+    /// Resolves all available BDIX FTP servers + Global stream sources for a title using all configured addons
+    /// Updates `addonStates` and `availableStreams` in real time as each addon resolves
     func resolveStreams(for media: TmdbMedia, season: Int = 1, episode: Int = 1) async -> [StreamSource] {
+        activeLookupTask?.cancel()
+
+        isResolvingAddons = true
+        availableStreams = []
+
         let isTV = !media.isMovie
         let id = media.id
         let year = media.displayDate
 
-        return await BDIXAddonScraper.shared.resolveAllAddons(
+        let imdbId = await fetchExternalImdbId(tmdbId: id, isTV: isTV)
+        let context = MediaLookupContext(
+            tmdbId: id,
+            imdbId: imdbId,
             title: media.displayTitle,
             year: year,
             isTV: isTV,
             season: season,
-            episode: episode,
-            tmdbId: id
+            episode: episode
         )
+
+        let activeAddons = addons.filter { $0.enabled }
+
+        // Initialize state to loading for each active addon
+        var initialStates: [String: AddonLookupState] = [:]
+        for a in activeAddons {
+            initialStates[a.name] = .loading
+        }
+        self.addonStates = initialStates
+
+        var allDiscoveredStreams: [StreamSource] = []
+
+        await withTaskGroup(of: (String, AddonLookupState, [StreamSource]).self) { group in
+            for addon in activeAddons {
+                group.addTask {
+                    do {
+                        let streams = try await AddonResolverService.shared.resolve(addon: addon, context: context)
+                        let state: AddonLookupState = streams.isEmpty ? .unavailable : .available(streams)
+                        return (addon.name, state, streams)
+                    } catch {
+                        return (addon.name, .failed("Offline/Timeout"), [])
+                    }
+                }
+            }
+
+            for await (addonName, state, streams) in group {
+                self.addonStates[addonName] = state
+                if !streams.isEmpty {
+                    self.availableStreams.append(contentsOf: streams)
+                    allDiscoveredStreams.append(contentsOf: streams)
+                }
+            }
+        }
+
+        isResolvingAddons = false
+        return allDiscoveredStreams
+    }
+
+    func cancelLookup() {
+        activeLookupTask?.cancel()
+        activeLookupTask = nil
+        isResolvingAddons = false
     }
 
     func fetchTvSeasons(tvId: Int) async -> [TmdbSeason] {
