@@ -23,19 +23,16 @@ final class BDIXAddonScraper {
         async let ctgTask = resolveCtgMovies(title: title, tmdbId: tmdbId, isTV: isTV, season: season, episode: episode)
         async let roarTask = resolveRoarZone(title: title, isTV: isTV)
         async let vixTask = resolveVixSrc(tmdbId: tmdbId, isTV: isTV, season: season, episode: episode)
-        async let mlbdTask = MovieLinkBDScraper.shared.resolveStreams(title: title, year: year, isTV: isTV, season: season, episode: episode, tmdbId: tmdbId)
 
         let cineplexStreams = await cineplexTask
         let ctgStreams = await ctgTask
         let roarStreams = await roarTask
         let vixStreams = await vixTask
-        let mlbdStreams = await mlbdTask
 
         results.append(contentsOf: cineplexStreams)
         results.append(contentsOf: ctgStreams)
         results.append(contentsOf: roarStreams)
         results.append(contentsOf: vixStreams)
-        results.append(contentsOf: mlbdStreams)
 
         return results
     }
@@ -170,7 +167,10 @@ final class BDIXAddonScraper {
         for item in items.prefix(2) {
             guard let itemId = item["Id"] as? String ?? (item["Id"] as? Int).map(String.init) else { continue }
             let name = item["Name"] as? String ?? title
-            let masterUrl = "https://play.roarzone.net/videos/\(itemId)/master.m3u8?api_key=\(token)&VideoCodec=hevc,h264&AudioCodec=aac,mp3"
+            let msId = "mediasource_\(itemId)"
+            let masterUrl = "https://play.roarzone.net/videos/\(itemId)/master.m3u8?api_key=\(token)&MediaSourceId=\(msId)&DeviceId=Eentertainment-iOS&VideoCodec=h264,hevc&AudioCodec=aac,mp3"
+            let directUrl = "https://play.roarzone.net/Videos/\(itemId)/stream?MediaSourceId=\(msId)&static=true&api_key=\(token)"
+
             streams.append(StreamSource(
                 url: masterUrl,
                 quality: "HD 1080P",
@@ -178,7 +178,19 @@ final class BDIXAddonScraper {
                 type: "direct",
                 headers: [
                     "User-Agent": defaultUA,
-                    "Referer": "https://play.roarzone.net/web/index.html"
+                    "Referer": "https://play.roarzone.net/web/index.html",
+                    "Origin": "https://play.roarzone.net"
+                ]
+            ))
+            streams.append(StreamSource(
+                url: directUrl,
+                quality: "Direct Stream",
+                provider: "RoarZone [EMBY Direct] (\(name))",
+                type: "direct",
+                headers: [
+                    "User-Agent": defaultUA,
+                    "Referer": "https://play.roarzone.net/web/index.html",
+                    "Origin": "https://play.roarzone.net"
                 ]
             ))
         }
