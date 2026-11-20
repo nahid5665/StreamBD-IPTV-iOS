@@ -45,7 +45,7 @@ final class AddonResolverService {
             }
 
             // 5. Stremio-Protocol HTTP Addons
-            if url.contains("stremio") || url.hasSuffix("/manifest.json") || url.contains("/stream/") {
+            if url.contains("stremio") || url.hasSuffix("/manifest.json") || url.contains("/stream/") || addon.type == "stremio" {
                 return await self.resolveStremioProtocol(addon: addon, context: context)
             }
 
@@ -126,13 +126,24 @@ final class AddonResolverService {
             }
 
             let epName = matchedEp["Name"] as? String ?? "Episode \(epNum)"
-            let masterUrl = "https://play.roarzone.net/videos/\(epId)/master.m3u8?api_key=\(token)&VideoCodec=hevc,h264&AudioCodec=aac,mp3"
+            let masterUrl = "https://play.roarzone.net/videos/\(epId)/master.m3u8?api_key=\(token)&MediaSourceId=\(epId)&DeviceId=Eentertainment-iOS&VideoCodec=hevc,h264&AudioCodec=aac,mp3"
+            let directUrl = "https://play.roarzone.net/Videos/\(epId)/stream?static=true&api_key=\(token)"
 
             return [
                 StreamSource(
                     url: masterUrl,
                     quality: "HD 1080P",
                     provider: "RoarZone [EMBY] (S\(seasonNum)E\(epNum): \(epName))",
+                    type: "direct",
+                    headers: [
+                        "User-Agent": defaultUA,
+                        "Referer": "https://play.roarzone.net/web/index.html"
+                    ]
+                ),
+                StreamSource(
+                    url: directUrl,
+                    quality: "Direct Stream",
+                    provider: "RoarZone [EMBY Direct] (S\(seasonNum)E\(epNum): \(epName))",
                     type: "direct",
                     headers: [
                         "User-Agent": defaultUA,
@@ -160,11 +171,23 @@ final class AddonResolverService {
             for item in items.prefix(2) {
                 guard let itemId = item["Id"] as? String ?? (item["Id"] as? Int).map(String.init) else { continue }
                 let name = item["Name"] as? String ?? context.title
-                let masterUrl = "https://play.roarzone.net/videos/\(itemId)/master.m3u8?api_key=\(token)&VideoCodec=hevc,h264&AudioCodec=aac,mp3"
+                let masterUrl = "https://play.roarzone.net/videos/\(itemId)/master.m3u8?api_key=\(token)&MediaSourceId=\(itemId)&DeviceId=Eentertainment-iOS&VideoCodec=hevc,h264&AudioCodec=aac,mp3"
+                let directUrl = "https://play.roarzone.net/Videos/\(itemId)/stream?static=true&api_key=\(token)"
+
                 streams.append(StreamSource(
                     url: masterUrl,
                     quality: "HD 1080P",
                     provider: "RoarZone [EMBY] (\(name))",
+                    type: "direct",
+                    headers: [
+                        "User-Agent": defaultUA,
+                        "Referer": "https://play.roarzone.net/web/index.html"
+                    ]
+                ))
+                streams.append(StreamSource(
+                    url: directUrl,
+                    quality: "Direct Stream",
+                    provider: "RoarZone [EMBY Direct] (\(name))",
                     type: "direct",
                     headers: [
                         "User-Agent": defaultUA,
