@@ -22,6 +22,10 @@ final class CineplexScraper {
 
     /// Scrapes cineplexbd.net in real-time for direct BDIX MP4 / HLS streams
     func resolveStreams(title: String, isTV: Bool = false, season: Int = 1, episode: Int = 1) async -> [StreamSource] {
+        // APK-parity: warm the site in a real WebKit session first so any JS
+        // challenge runs and session/CF cookies land in the shared jar.
+        await SitePrewarmer.shared.prewarm(origin: baseUrl)
+
         let cleanTitle = sanitizeQuery(title)
         var candidates = await searchCandidates(query: cleanTitle)
 
@@ -47,9 +51,8 @@ final class CineplexScraper {
                 vReq.setValue("\(baseUrl)/", forHTTPHeaderField: "Referer")
                 vReq.timeoutInterval = 5
                 if let (_, vResp) = try? await URLSession.shared.data(for: vReq),
-                   let httpResp = vResp as? HTTPURLResponse,
-                   let cookies = httpResp.allHeaderFields["Set-Cookie"] as? String {
-                    viewCookie = cookies
+                   let httpResp = vResp as? HTTPURLResponse {
+                    viewCookie = Self.extractCookies(from: httpResp, for: vUrl)
                 }
             }
 
@@ -71,9 +74,8 @@ final class CineplexScraper {
                   let pHtml = String(data: pData, encoding: .utf8) else { continue }
 
             var playerCookie = ""
-            if let httpResp = pResp as? HTTPURLResponse,
-               let cookies = httpResp.allHeaderFields["Set-Cookie"] as? String {
-                playerCookie = cookies
+            if let httpResp = pResp as? HTTPURLResponse {
+                playerCookie = Self.extractCookies(from: httpResp, for: pUrl)
             }
             let combinedCookie = viewCookie.isEmpty ? playerCookie : (playerCookie.isEmpty ? viewCookie : "\(viewCookie); \(playerCookie)")
 
@@ -130,6 +132,46 @@ final class CineplexScraper {
         }
 
         return streamSources
+    }
+
+    /// Robust Set-Cookie extraction: case-insensitive header scan, HTTPCookie
+    /// parsing, then shared-jar fallback. URLSession may fold Set-Cookie headers
+    /// into HTTPCookieStorage and omit them from allHeaderFields entirely.
+    private static func extractCookies(from response: HTTPURLResponse, for url: URL) -> String {
+        var collected: [String] = []
+
+        let fields = response.allHeaderFields
+        for (key, value) in fields {
+            if "\(key)".caseInsensitiveCompare("set-cookie") == .orderedSame {
+                collected.append("\(value)")
+            }
+        }
+
+        if let castFields = fields as? [String: String] {
+            let parsed = HTTPCookie.cookies(withResponseHeaderFields: castFields, for: url)
+            for c in parsed {
+                collected.append("\(c.name)=\(c.value)")
+            }
+        }
+
+        if collected.isEmpty {
+            let jar = HTTPCookieStorage.shared.cookies(for: url)
+            for c in jar {
+                collected.append("\(c.name)=\(c.value)")
+            }
+        }
+
+        // De-duplicate identical pairs while preserving order
+        var seen = Set<String>()
+        var unique: [String] = []
+        for c in collected where !c.isEmpty {
+            if seen.insert(c).inserted { unique.append(c) }
+        }
+        let result = unique.joined(separator: "; ")
+        if AppConfig.debugAddonLogging && !result.isEmpty {
+            print("[CineplexScraper] cookies from \(url.path): \(result.count) chars")
+        }
+        return result
     }
 
     private func searchCandidates(query: String) async -> [(kind: String, id: String, title: String)] {
@@ -209,6 +251,9 @@ final class CineplexScraper {
             }
         }
 
+        if AppConfig.debugAddonLogging {
+            print("[CineplexScraper] search '\(query)' -> \(candidates.count) candidates")
+        }
         return candidates
     }
 }
