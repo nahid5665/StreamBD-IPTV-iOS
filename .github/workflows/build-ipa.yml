@@ -42,36 +42,34 @@ jobs:
         run: |
           mkdir -p Payload
           cp -r build/Build/Products/Release-iphoneos/Eentertainment.app Payload/
-          zip -r9 Eentertainment-v5.7.4-iOS.ipa Payload
+          zip -r9 Eentertainment-v5.7.5-iOS.ipa Payload
 
       - name: Upload Unsigned IPA Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: Eentertainment-v5.7.4-iOS-IPA
-          path: Eentertainment-v5.7.4-iOS.ipa
+          name: Eentertainment-v5.7.5-iOS-IPA
+          path: Eentertainment-v5.7.5-iOS.ipa
           if-no-files-found: error
 
       - name: Publish Direct IPA to GitHub Releases
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v5.7.4-eentertainment
-          name: "Eentertainment v5.7.4 — ATS Fix: Plain-HTTP Scraping Unblocked (Cineplex)"
+          tag_name: v5.7.5-eentertainment
+          name: "Eentertainment v5.7.5 — Cineplex Scraper UA Fallback + Full Failure Logging"
           body: |
-            ### Eentertainment v5.7.4
+            ### Eentertainment v5.7.5
 
-            🚀 **ROOT CAUSE FIX — App Transport Security was blocking every plain-HTTP scraper**
+            🔍 **Diagnostics round 2 — every silent failure now logs itself**
 
-            #### What's Fixed in v5.7.4:
-            1. **ATS key conflict (the real cineplex blocker)**:
-               - `NSAllowsArbitraryLoadsInWebContent` was present in Info.plist alongside
-                 `NSAllowsArbitraryLoads`. Per Apple's ATS rules, when the web-content key is
-                 present the system IGNORES `NSAllowsArbitraryLoads` — so every URLSession
-                 request to `http://cineplexbd.net` (native scraper + JS fetch bridge) failed
-                 with "App Transport Security policy requires the use of a secure connection".
-               - Removed `NSAllowsArbitraryLoadsInWebContent`; `NSAllowsArbitraryLoads` now
-                 actually applies, allowing plain-HTTP scraping exactly like Android's
-                 `usesCleartextTraffic="true"`.
-            2. Diagnostics screen (from v5.7.3) kept for on-device verification.
-          files: Eentertainment-v5.7.4-iOS.ipa
+            #### What's Changed in v5.7.5:
+            1. **CineplexScraper UA-strategy fallback**:
+               - ATS is fixed, but the site still returned nothing with the desktop-Chrome UA
+                 while the diagnostics probe (session default UA) succeeded. Search now tries
+                 session-default UA → iOS Safari UA → desktop Chrome UA and keeps whichever works.
+            2. **No more swallowed errors**:
+               - search/view/player steps and every JS-runner stage (script fetch, bootstrap,
+                 plugin evaluate, invoke) now log real HTTP codes, byte counts and error messages.
+            3. Version bump 5.7.5 (build 66). Diagnostics screen unchanged — run the same test.
+          files: Eentertainment-v5.7.5-iOS.ipa
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

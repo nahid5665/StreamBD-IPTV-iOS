@@ -213,16 +213,34 @@ private final class HeadlessJSInstance: NSObject, WKNavigationDelegate {
     }
 
     func execute(bootstrapScript: String, pluginScript: String, invokeScript: String, arguments: [String: Any]) async throws -> Any? {
-        guard let wv = webView else { return nil }
-
-        if !bootstrapScript.isEmpty {
-            _ = try await wv.evaluateJavaScript(bootstrapScript)
+        guard let wv = webView else {
+            addonLog("[JSVODAddonRunner] execute called with no webView")
+            return nil
         }
 
-        let moduleWrapper = "var module = { exports: {} }; var exports = module.exports;\n" + pluginScript
-        _ = try await wv.evaluateJavaScript(moduleWrapper)
+        do {
+            if !bootstrapScript.isEmpty {
+                _ = try await wv.evaluateJavaScript(bootstrapScript)
+            }
 
-        return try await wv.callAsyncJavaScript(invokeScript, arguments: arguments, in: nil, contentWorld: .page)
+            let moduleWrapper = "var module = { exports: {} }; var exports = module.exports;\n" + pluginScript
+            _ = try await wv.evaluateJavaScript(moduleWrapper)
+        } catch {
+            addonLog("[JSVODAddonRunner] bootstrap/plugin evaluate FAILED: \(error.localizedDescription)")
+            throw error
+        }
+
+        do {
+            let raw = try await wv.callAsyncJavaScript(invokeScript, arguments: arguments, in: nil, contentWorld: .page)
+            if AppConfig.debugAddonLogging {
+                let preview = String(describing: raw).prefix(300)
+                addonLog("[JSVODAddonRunner] invoke returned: \(String(describing: type(of: raw))) \(preview)")
+            }
+            return raw
+        } catch {
+            addonLog("[JSVODAddonRunner] invoke FAILED: \(error.localizedDescription)")
+            throw error
+        }
     }
 
     func destroy() {
@@ -275,6 +293,7 @@ final class JSVODAddonRunner {
         guard let (data, resp) = try? await URLSession.shared.data(for: req),
               (resp as? HTTPURLResponse)?.statusCode == 200,
               let text = String(data: data, encoding: .utf8), !text.isEmpty else {
+            addonLog("[JSVODAddonRunner] fetchScript \(urlString) failed or non-200")
             return nil
         }
         cacheScript(text, for: urlString)
@@ -295,6 +314,7 @@ final class JSVODAddonRunner {
 
     func resolveStreams(addon: Addon, context: MediaLookupContext) async throws -> [StreamSource] {
         guard let pluginScript = await fetchScript(from: addon.url) else {
+            addonLog("[JSVODAddonRunner] addon '\(addon.name)': script fetch failed for \(addon.url)")
             return []
         }
 
@@ -303,8 +323,15 @@ final class JSVODAddonRunner {
             limiter.release()
         }
 
-        return try await withTimeout(seconds: 25.0) {
-            return try await self.executePlugin(script: pluginScript, addon: addon, context: context)
+        do {
+            let result = try await withTimeout(seconds: 25.0) {
+                return try await self.executePlugin(script: pluginScript, addon: addon, context: context)
+            }
+            addonLog("[JSVODAddonRunner] addon '\(addon.name)' -> \(result.count) streams")
+            return result
+        } catch {
+            addonLog("[JSVODAddonRunner] addon '\(addon.name)' execute FAILED: \(error.localizedDescription)")
+            throw error
         }
     }
 
@@ -524,7 +551,15 @@ final class JSVODAddonRunner {
             return []
         }
 
-        guard let array = rawResult as? [Any] else { return [] }
+        if rawResult == nil {
+            addonLog("[JSVODAddonRunner] Addon '\(addon.name)': invoke returned nil")
+            return []
+        }
+
+        guard let array = rawResult as? [Any] else {
+            addonLog("[JSVODAddonRunner] Addon '\(addon.name)': unexpected result type \(type(of: rawResult))")
+            return []
+        }
         var results: [StreamSource] = []
 
         for item in array {

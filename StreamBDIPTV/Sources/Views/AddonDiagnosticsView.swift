@@ -99,10 +99,14 @@ struct AddonDiagnosticsView: View {
                         tmdbId: 27205, imdbId: nil, title: "Inception", year: "2010",
                         isTV: false, season: 1, episode: 1
                     )
-                    let jsStreams = (try? await JSVODAddonRunner.shared.resolveStreams(addon: addon, context: ctx)) ?? []
-                    addonLog("[Diagnostics] JS runner -> \(jsStreams.count) stream(s)")
-                    for s in jsStreams {
-                        addonLog("[Diagnostics]   [\(s.quality ?? "-")] \(s.url)")
+                    do {
+                        let jsStreams = try await JSVODAddonRunner.shared.resolveStreams(addon: addon, context: ctx)
+                        addonLog("[Diagnostics] JS runner -> \(jsStreams.count) stream(s)")
+                        for s in jsStreams {
+                            addonLog("[Diagnostics]   [\(s.quality ?? "-")] \(s.url)")
+                        }
+                    } catch {
+                        addonLog("[Diagnostics] JS runner FAILED: \(error.localizedDescription)")
                     }
                 }
             }
