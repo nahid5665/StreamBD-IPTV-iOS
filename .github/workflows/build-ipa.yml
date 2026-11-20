@@ -42,46 +42,33 @@ jobs:
         run: |
           mkdir -p Payload
           cp -r build/Build/Products/Release-iphoneos/Eentertainment.app Payload/
-          zip -r9 Eentertainment-v5.7.2-iOS.ipa Payload
+          zip -r9 Eentertainment-v5.7.3-iOS.ipa Payload
 
       - name: Upload Unsigned IPA Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: Eentertainment-v5.7.2-iOS-IPA
-          path: Eentertainment-v5.7.2-iOS.ipa
+          name: Eentertainment-v5.7.3-iOS-IPA
+          path: Eentertainment-v5.7.3-iOS.ipa
           if-no-files-found: error
 
       - name: Publish Direct IPA to GitHub Releases
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v5.7.2-eentertainment
-          name: "Eentertainment v5.7.2 — Cookie Bridge Fix, Site Prewarm & Cineplex Session Repair"
+          tag_name: v5.7.3-eentertainment
+          name: "Eentertainment v5.7.3 — In-App Addon Diagnostics (Cineplex Test)"
           body: |
-            ### Eentertainment v5.7.2
+            ### Eentertainment v5.7.3
 
-            🔧 **WKScriptMessageHandlerWithReply fix + Cookie persistence + Prewarm bypass**
+            🩺 **On-device Addon Diagnostics — debug without a Mac**
 
-            #### What's Fixed in v5.7.2:
-            1. **Bridge registration fix (critical)**:
-               - `NativeFetchBridge` is a `WKScriptMessageHandlerWithReply`; it was registered with the plain
-                 `addScriptMessageHandler` API, so awaited `postMessage()` replies never resolved and every
-                 JS addon fetch returned an empty body. Now registered via `addScriptMessageHandlerWithReply`.
-            2. **Cookie jar exposure for addon cookie-chaining**:
-               - URLSession folds `Set-Cookie` into `HTTPCookieStorage` and may omit it from `allHeaderFields`;
-                 the fetch bridge now always exposes the authoritative `name=value` jar pairs for the URL via
-                 `headers.get('set-cookie')`, so `combinedCookie` chaining (cineplexbd.js) works like Android.
-            3. **Explicit addon Cookie headers honored exactly**:
-               - When an addon sends a `Cookie` header, `httpShouldHandleCookies` is disabled for that request
-                 so URLSession cannot override it with jar contents (Android WebView semantics).
-            4. **Site Prewarm (doBypass parity)**:
-               - New `SitePrewarmer` loads provider homepages (e.g. http://cineplexbd.net) in a hidden persistent
-                 WKWebView so JS challenges execute in a real browser, then mirrors cookies into the URLSession jar.
-            5. **CineplexScraper cookie robustness**:
-               - Case-insensitive `Set-Cookie` scan + `HTTPCookie` parsing + shared-jar fallback, with debug logs.
-            6. **Timeouts right-sized**:
-               - Addon resolve 12s → 45s (outer), JS plugin 10s → 25s, bridge fetch 8s → 15s.
-            7. **Debug logging**:
-               - `AppConfig.debugAddonLogging` prints the whole pipeline (bridge fetches, scraper steps, prewarm).
-          files: Eentertainment-v5.7.2-iOS.ipa
+            #### What's New in v5.7.3:
+            1. **Addon Diagnostics screen** (Settings → Addon Diagnostics):
+               - Live in-app log buffer for the whole addon pipeline (fetch bridge, prewarm, scrapers, resolver).
+               - "Run Cineplex Test" button: probes `http://cineplexbd.net` reachability, runs the native
+                 2-step scraper AND the JS fallback for 'Inception', and reports every step + resulting streams.
+               - Copy-to-clipboard + clear buttons for sharing results.
+            2. **Resolver/scraper result logging**: every addon's stream count (or failure reason) is logged
+               during normal movie lookups, visible in the diagnostics screen.
+          files: Eentertainment-v5.7.3-iOS.ipa
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

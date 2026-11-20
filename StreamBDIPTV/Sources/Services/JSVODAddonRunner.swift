@@ -118,7 +118,7 @@ final class NativeFetchBridge: NSObject, WKScriptMessageHandlerWithReply {
                 }
 
                 if AppConfig.debugAddonLogging {
-                    print("[NativeFetchBridge] \(method) \(urlString) -> \(statusCode) (bytes: \(data.count))")
+                    addonLog("[NativeFetchBridge] \(method) \(urlString) -> \(statusCode) (bytes: \(data.count))")
                 }
 
                 let bodyText = String(data: data, encoding: .utf8)
@@ -136,7 +136,7 @@ final class NativeFetchBridge: NSObject, WKScriptMessageHandlerWithReply {
                 }
             } catch {
                 if AppConfig.debugAddonLogging {
-                    print("[NativeFetchBridge] \(method) \(urlString) FAILED: \(error.localizedDescription)")
+                    addonLog("[NativeFetchBridge] \(method) \(urlString) FAILED: \(error.localizedDescription)")
                 }
                 let errorDict: [String: Any] = [
                     "status": 0,
@@ -520,7 +520,7 @@ final class JSVODAddonRunner {
 
     private func parseStreamSources(from rawResult: Any?, addon: Addon) -> [StreamSource] {
         if let dict = rawResult as? [String: Any], let errorMsg = dict["error"] as? String {
-            print("[JSVODAddonRunner] Addon '\(addon.name)' JS runtime error: \(errorMsg)")
+            addonLog("[JSVODAddonRunner] Addon '\(addon.name)' JS runtime error: \(errorMsg)")
             return []
         }
 
@@ -629,7 +629,7 @@ final class SitePrewarmer {
         defer { wv.stopLoading() }
 
         if AppConfig.debugAddonLogging {
-            print("[SitePrewarmer] warming \(origin)")
+            addonLog("[SitePrewarmer] warming \(origin)")
         }
         _ = wv.load(URLRequest(url: url))
         // Let the page (and any challenge JS / redirects) settle before mirroring.
@@ -643,7 +643,7 @@ final class SitePrewarmer {
             HTTPCookieStorage.shared.setCookie(c)
         }
         if AppConfig.debugAddonLogging {
-            print("[SitePrewarmer] \(origin): mirrored \(cookies.count) cookies into URLSession jar")
+            addonLog("[SitePrewarmer] \(origin): mirrored \(cookies.count) cookies into URLSession jar")
         }
     }
 }

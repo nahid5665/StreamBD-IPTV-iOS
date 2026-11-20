@@ -1363,6 +1363,7 @@ struct SettingsNetflixView: View {
     @State private var newAddonUrl: String = ""
     @State private var addonAlert: String? = nil
     @State private var showAddonAlert: Bool = false
+    @State private var showAddonDiagnostics: Bool = false
 
     var body: some View {
         NavigationStack {
@@ -1515,6 +1516,29 @@ struct SettingsNetflixView: View {
                     }
                     .padding(.horizontal, 20)
 
+                    // Addon Diagnostics
+                    VStack(alignment: .leading, spacing: 12) {
+                        Label("Diagnostics", systemImage: "stethoscope")
+                            .font(.headline)
+                            .foregroundStyle(.white)
+
+                        Button {
+                            showAddonDiagnostics = true
+                        } label: {
+                            HStack(spacing: 6) {
+                                Image(systemName: "waveform.path")
+                                Text("Addon Diagnostics (Cineplex Test)")
+                                    .font(.subheadline.bold())
+                            }
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 12)
+                            .background(Color.white.opacity(0.08))
+                            .foregroundStyle(.white)
+                            .clipShape(RoundedRectangle(cornerRadius: 10))
+                        }
+                    }
+                    .padding(.horizontal, 20)
+
                     // App Information
                     VStack(spacing: 6) {
                         Text(AppConfig.appName)
@@ -1536,6 +1560,9 @@ struct SettingsNetflixView: View {
                 Button("OK", role: .cancel) { }
             } message: {
                 Text(addonAlert ?? "")
+            }
+            .sheet(isPresented: $showAddonDiagnostics) {
+                AddonDiagnosticsView()
             }
         }
     }

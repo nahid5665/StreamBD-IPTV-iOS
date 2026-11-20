@@ -168,8 +168,8 @@ final class CineplexScraper {
             if seen.insert(c).inserted { unique.append(c) }
         }
         let result = unique.joined(separator: "; ")
-        if AppConfig.debugAddonLogging && !result.isEmpty {
-            print("[CineplexScraper] cookies from \(url.path): \(result.count) chars")
+        if AppConfig.debugAddonLogging {
+            addonLog("[CineplexScraper] cookies from \(url.path): \(result.count) chars")
         }
         return result
     }
@@ -252,7 +252,7 @@ final class CineplexScraper {
         }
 
         if AppConfig.debugAddonLogging {
-            print("[CineplexScraper] search '\(query)' -> \(candidates.count) candidates")
+            addonLog("[CineplexScraper] search '\(query)' -> \(candidates.count) candidates")
         }
         return candidates
     }

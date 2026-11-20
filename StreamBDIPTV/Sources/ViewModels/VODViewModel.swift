@@ -200,6 +200,7 @@ final class VODViewModel: ObservableObject {
                         let state: AddonLookupState = streams.isEmpty ? .unavailable : .available(streams)
                         return (addon.name, state, streams)
                     } catch {
+                        addonLog("[AddonResolver] \(addon.name) FAILED: \(error.localizedDescription)")
                         return (addon.name, .failed("Offline/Timeout"), [])
                     }
                 }
