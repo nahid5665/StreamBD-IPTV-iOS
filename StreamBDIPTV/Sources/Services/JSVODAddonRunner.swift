@@ -111,7 +111,7 @@ final class NativeFetchBridge: NSObject, WKScriptMessageHandlerWithReply {
                 // URLSession folds Set-Cookie into the shared jar and may omit it
                 // from allHeaderFields; the jar holds the authoritative clean
                 // name=value pairs for this URL, so prefer it over the raw header.
-                let jarCookies = HTTPCookieStorage.shared.cookies(for: url)
+                let jarCookies = HTTPCookieStorage.shared.cookies(for: url) ?? []
                 let jarString = jarCookies.map { "\($0.name)=\($0.value)" }.joined(separator: "; ")
                 if !jarString.isEmpty {
                     respHeaders["set-cookie"] = jarString
@@ -171,7 +171,7 @@ private final class HeadlessJSInstance: NSObject, WKNavigationDelegate {
         let ucc = WKUserContentController()
         // Must use the WithReply registration: the JS side awaits postMessage(),
         // which only resolves when a WKScriptMessageHandlerWithReply is registered.
-        ucc.addScriptMessageHandlerWithReply(fetchBridge, contentWorld: .page, name: "nativeFetch")
+        ucc.addScriptMessageHandler(fetchBridge, contentWorld: .page, name: "nativeFetch")
         config.userContentController = ucc
 
         let wv = WKWebView(frame: .zero, configuration: config)
