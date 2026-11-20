@@ -122,7 +122,7 @@ struct PlaybackOptionsSheet: View {
                         }
                     }
                     .onChange(of: vlcSelectedAudioIndex) { newIndex in
-                        vlcPlayer?.audioTrackIndex = newIndex
+                        vlcPlayer?.currentAudioTrackIndex = newIndex
                     }
                 } else {
                     Text(vlcAudioOptions.isEmpty ? "No audio track info available yet." : "Only one audio track in this stream.")
@@ -185,9 +185,11 @@ struct PlaybackOptionsSheet: View {
 
     private func refreshAudioTracks() {
         if engine == .vlc, let p = vlcPlayer {
-            let names = p.audioTrackNames ?? []
+            // This VLCKit build exposes the legacy audio API: audioTrackNames is
+            // [Any] and the current index lives on currentAudioTrackIndex.
+            let names = (p.audioTrackNames ?? []).map { "\($0)" }
             vlcAudioOptions = names
-            let idx = p.audioTrackIndex
+            let idx = p.currentAudioTrackIndex
             if idx >= 0 && idx < names.count {
                 vlcSelectedAudioIndex = idx
             }
@@ -195,7 +197,7 @@ struct PlaybackOptionsSheet: View {
             if let group = try? item.asset.mediaSelectionGroup(forMediaCharacteristic: .audible) {
                 let options = group.options
                 avAudioOptions = options.map { $0.displayName }
-                let current = item.currentMediaSelection.selectedOption(in: group)
+                let current = item.currentMediaSelection.selectedOption(for: group)
                 if let current, let idx = options.firstIndex(of: current) {
                     avSelectedAudioIndex = idx
                 }
