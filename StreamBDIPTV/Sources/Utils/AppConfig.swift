@@ -10,7 +10,11 @@ struct EmbeddedPlaylist: Hashable, Identifiable {
 
 enum AppConfig {
     static let appName = "Eentertainment"
-    static let appVersion = "v5.7.1"
+    static let appVersion = "v5.7.2"
+
+    /// Verbose addon-pipeline logging (fetch bridge, scrapers, prewarm).
+    /// Visible in Console.app / idevicesyslog under the app process.
+    static let debugAddonLogging = true
 
     // Native AES-128-CBC credentials
     static let nativeAesKey = "X3#yS@6k~u&hr$0z"
