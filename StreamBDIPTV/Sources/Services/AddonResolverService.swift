@@ -14,12 +14,31 @@ final class AddonResolverService {
 
     /// Executes a single addon with strict timeout isolation
     func resolve(addon: Addon, context: MediaLookupContext) async throws -> [StreamSource] {
-        return try await withTimeout(seconds: 8.0) {
+        return try await withTimeout(seconds: 12.0) {
             let lowerName = addon.name.lowercased()
             let lowerId = addon.id.lowercased()
             let url = addon.url.lowercased()
 
-            // 1. Cineplex BD [BDIX]
+            // 1. RoarZone EMBY Server (Series -> Season -> Episode resolution)
+            if lowerId.contains("roarzone") || lowerName.contains("roarzone") || url.contains("roarzone") {
+                return await self.resolveRoarZoneEmby(context: context)
+            }
+
+            // 2. Stremio-Protocol HTTP Addons
+            if url.contains("stremio") || url.hasSuffix("/manifest.json") || url.contains("/stream/") || addon.type == "stremio" {
+                return await self.resolveStremioProtocol(addon: addon, context: context)
+            }
+
+            // 3. Dynamic JavaScript VOD Plugin (*.js)
+            if url.hasSuffix(".js") || addon.url.hasSuffix(".js") {
+                let jsStreams = (try? await JSVODAddonRunner.shared.resolveStreams(addon: addon, context: context)) ?? []
+                if !jsStreams.isEmpty {
+                    return jsStreams
+                }
+            }
+
+            // 4. Swift Native Fallbacks (if JS engine returned empty or not a .js addon)
+            // Cineplex BD [BDIX]
             if lowerId.contains("cineplex") || lowerName.contains("cineplex") {
                 return await CineplexScraper.shared.resolveStreams(
                     title: context.title,
@@ -29,27 +48,17 @@ final class AddonResolverService {
                 )
             }
 
-            // 2. RoarZone EMBY Server (Series -> Season -> Episode resolution)
-            if lowerId.contains("roarzone") || lowerName.contains("roarzone") || url.contains("roarzone") {
-                return await self.resolveRoarZoneEmby(context: context)
-            }
-
-            // 3. CTG Movies FTP [BDIX]
+            // CTG Movies FTP [BDIX]
             if lowerId.contains("ctg") || lowerName.contains("ctg") || url.contains("ctgmovies") {
                 return await self.resolveCtgMovies(context: context)
             }
 
-            // 4. VixSrc HD
+            // VixSrc HD
             if lowerId.contains("vixsrc") || lowerName.contains("vixsrc") || url.contains("vixsrc") {
                 return await self.resolveVixSrc(context: context)
             }
 
-            // 5. Stremio-Protocol HTTP Addons
-            if url.contains("stremio") || url.hasSuffix("/manifest.json") || url.contains("/stream/") || addon.type == "stremio" {
-                return await self.resolveStremioProtocol(addon: addon, context: context)
-            }
-
-            // 6. Generic BDIX / Web Addon Fallback
+            // 5. Generic Addon Fallback
             return await self.resolveGenericAddon(addon: addon, context: context)
         }
     }
@@ -437,7 +446,9 @@ final class AddonResolverService {
     // MARK: - 5. Generic Addon Endpoint Fallback
 
     private func resolveGenericAddon(addon: Addon, context: MediaLookupContext) async -> [StreamSource] {
-        // Safe placeholder for custom scripts / personal BDIX portals
+        if addon.url.lowercased().hasSuffix(".js") {
+            return (try? await JSVODAddonRunner.shared.resolveStreams(addon: addon, context: context)) ?? []
+        }
         return []
     }
 
