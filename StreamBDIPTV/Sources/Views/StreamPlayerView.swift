@@ -235,6 +235,14 @@ struct UniversalFullScreenPlayerView: View {
     @State private var errorMessage: String? = nil
     @State private var statusToast: String? = nil
 
+    // VLC-style playback options (brightness / volume / speed / tracks / subtitles)
+    @State private var showPlaybackOptions: Bool = false
+    @State private var playbackSpeed: Float = 1.0
+    @State private var gestureHUDText: String? = nil
+    @State private var gestureStartBrightness: CGFloat = UIScreen.main.brightness
+    @State private var brightnessAtOpen: CGFloat = UIScreen.main.brightness
+    @State private var vlcVolumePercent: Int = 100
+
     private var shouldUseVLC: Bool {
         let lower = url.absoluteString.lowercased()
         return lower.contains(".ts") || lower.contains("/mpegts") || lower.contains(".mkv") || lower.hasPrefix("rtmp://")
@@ -417,11 +425,63 @@ struct UniversalFullScreenPlayerView: View {
                 hudControlsOverlay
                     .transition(.opacity)
             }
+
+            // Gesture indicator (brightness / volume), VLC-style
+            if let text = gestureHUDText {
+                VStack {
+                    Spacer()
+                    Text(text)
+                        .font(.system(size: 15, weight: .bold, design: .rounded))
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 8)
+                        .background(.ultraThinMaterial)
+                        .background(Color.black.opacity(0.35))
+                        .clipShape(Capsule())
+                        .padding(.bottom, 90)
+                }
+                .zIndex(250)
+                .allowsHitTesting(false)
+            }
         }
+        .simultaneousGesture(
+            // VLC-style vertical gestures: left third = brightness,
+            // right third = volume (VLC engine only).
+            DragGesture(minimumDistance: 8)
+                .onChanged { value in
+                    guard !isScrubbing else { return }
+                    guard abs(value.translation.height) > abs(value.translation.width) else { return }
+                    let w = UIScreen.main.bounds.width
+                    let startX = value.startLocation.x
+                    let dy = -value.translation.height
+                    if startX < w / 3 {
+                        let delta = dy / 500.0
+                        let newB = min(1.0, max(0.05, gestureStartBrightness + delta))
+                        UIScreen.main.brightness = newB
+                        gestureHUDText = "☀️ \(Int(newB * 100))%"
+                    } else if startX > w * 2 / 3, currentEngine == .vlc, let p = vlcPlayer {
+                        let delta = Int(dy / 4.0)
+                        let newV = min(100, max(0, vlcVolumePercent + delta))
+                        p.audio.volume = Int(Float(newV) / 100.0 * 256.0)
+                        vlcVolumePercent = newV
+                        gestureHUDText = "🔊 \(newV)%"
+                    }
+                }
+                .onEnded { _ in
+                    gestureStartBrightness = UIScreen.main.brightness
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) {
+                        gestureHUDText = nil
+                    }
+                }
+        )
         .gesture(
             DragGesture(minimumDistance: 30)
                 .onEnded { value in
-                    if value.translation.height > 60 {
+                    // Dismiss only from the middle horizontal third; the left
+                    // third is brightness, the right third is volume.
+                    let w = UIScreen.main.bounds.width
+                    let inMiddleThird = value.startLocation.x > w / 3 && value.startLocation.x < w * 2 / 3
+                    if value.translation.height > 60 && inMiddleThird {
                         stopAndDismiss()
                     }
                 }
@@ -436,13 +496,30 @@ struct UniversalFullScreenPlayerView: View {
             case .avPlayer:
                 currentEngine = .avPlayer
             }
+            brightnessAtOpen = UIScreen.main.brightness
+            gestureStartBrightness = brightnessAtOpen
             setupPlayer()
+            applyPlaybackSpeed(playbackSpeed)
             resetHideTimer()
         }
         .onDisappear {
+            UIScreen.main.brightness = brightnessAtOpen
             stopPlayback()
         }
         .statusBarHidden(!showControls)
+        .sheet(isPresented: $showPlaybackOptions) {
+            PlaybackOptionsSheet(
+                engine: currentEngine,
+                vlcPlayer: vlcPlayer,
+                avPlayer: avPlayer,
+                speed: $playbackSpeed,
+                vlcVolumePercent: $vlcVolumePercent,
+                onPickSubtitle: { url in
+                    handleSubtitleSelection(url)
+                }
+            )
+            .preferredColorScheme(.dark)
+        }
     }
 
     private var hudControlsOverlay: some View {
@@ -483,6 +560,19 @@ struct UniversalFullScreenPlayerView: View {
                     .background(.ultraThinMaterial)
                     .background(currentEngine == .avPlayer ? Color.blue.opacity(0.4) : Color.orange.opacity(0.4))
                     .clipShape(Capsule())
+                }
+
+                // Playback Options (speed / audio track / subtitles / brightness)
+                Button {
+                    showPlaybackOptions = true
+                } label: {
+                    Image(systemName: "ellipsis")
+                        .font(.system(size: 13, weight: .bold))
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 7)
+                        .background(.ultraThinMaterial)
+                        .clipShape(Capsule())
                 }
 
                 // Aspect Ratio Selector
@@ -678,6 +768,50 @@ struct UniversalFullScreenPlayerView: View {
             currentEngine = engine
         }
         setupPlayer()
+        applyPlaybackSpeed(playbackSpeed)
+    }
+
+    /// Applies the persisted playback rate to whichever engine is active.
+    private func applyPlaybackSpeed(_ s: Float) {
+        if let ap = avPlayer {
+            ap.defaultRate = s
+            if ap.timeControlStatus == .playing {
+                ap.rate = s
+            }
+        }
+        if let p = vlcPlayer {
+            p.rate = s
+        }
+    }
+
+    /// Loads a locally picked subtitle file into the VLC engine. External
+    /// subtitle slaves are a VLC capability, so an AVPlayer session
+    /// transparently switches engines first.
+    private func handleSubtitleSelection(_ securityURL: URL) {
+        let accessing = securityURL.startAccessingSecurityScopedResource()
+        defer { if accessing { securityURL.stopAccessingSecurityScopedResource() } }
+
+        do {
+            let tmp = FileManager.default.temporaryDirectory.appendingPathComponent(securityURL.lastPathComponent)
+            try? FileManager.default.removeItem(at: tmp)
+            try FileManager.default.copyItem(at: securityURL, to: tmp)
+
+            if currentEngine == .avPlayer {
+                switchEngine(to: .vlc)
+                statusToast = "Subtitles use the VLC engine — switched to VLC."
+            }
+
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) {
+                if let media = self.vlcPlayer?.media {
+                    _ = media.addSlave(ofType: .subtitle, to: tmp, at: 0)
+                    statusToast = "Subtitle loaded: \(tmp.lastPathComponent)"
+                } else {
+                    statusToast = "No media to attach the subtitle to"
+                }
+            }
+        } catch {
+            statusToast = "Subtitle import failed: \(error.localizedDescription)"
+        }
     }
 
     private func toggleControls() {

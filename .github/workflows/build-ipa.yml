@@ -42,37 +42,35 @@ jobs:
         run: |
           mkdir -p Payload
           cp -r build/Build/Products/Release-iphoneos/Eentertainment.app Payload/
-          zip -r9 Eentertainment-v5.7.7-iOS.ipa Payload
+          zip -r9 Eentertainment-v5.7.8-iOS.ipa Payload
 
       - name: Upload Unsigned IPA Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: Eentertainment-v5.7.7-iOS-IPA
-          path: Eentertainment-v5.7.7-iOS.ipa
+          name: Eentertainment-v5.7.8-iOS-IPA
+          path: Eentertainment-v5.7.8-iOS.ipa
           if-no-files-found: error
 
       - name: Publish Direct IPA to GitHub Releases
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v5.7.7-eentertainment
-          name: "Eentertainment v5.7.7 — APK-parity JS Runner + Non-UTF8 HTML Decode"
+          tag_name: v5.7.8-eentertainment
+          name: "Eentertainment v5.7.8 — VLC-Style Player Controls (Brightness, Subtitles, Audio Tracks, Speed)"
           body: |
-            ### Eentertainment v5.7.7
+            ### Eentertainment v5.7.8
 
-            🔬 **Diagnostics round 3 — both remaining failures fixed at the root**
+            🎚️ **VLC-style playback controls — tap the "⋯" button in the player HUD**
 
-            #### What's Fixed in v5.7.7:
-            1. **JS runner: 'unsupported type' crash (APK-parity fix)**:
-               - Every evaluated script now terminates with `; 'ok';` exactly like the
-                 Android QuickJS runner does. Without it, evaluateJavaScript tried to
-                 marshal the trailing JS function object (window.fetch / module.exports
-                 assignments) back to Swift and threw 'JavaScript execution returned a
-                 result of an unsupported type' — killing ALL JS addons before any fetch.
-            2. **Non-UTF8 HTML bodies (cineplexbd.net)**:
-               - The site serves 96,519-byte search/player pages that are NOT valid UTF-8.
-                 Added a decode chain: gzip magic strip+inflate → UTF-8 → UTF-16 BOM →
-                 ISO-Latin-1 (byte-total), with a hex head-dump log if truly undecodable.
-            3. Applies to native scraper AND every JS addon via the fetch bridge.
-          files: Eentertainment-v5.7.7-iOS.ipa
+            #### What's New in v5.7.8:
+            1. **Playback Options panel** (player HUD "⋯" button):
+               - **Playback speed**: 0.5× – 2× for both engines.
+               - **Brightness slider** (screen-level, works for both engines).
+               - **Volume slider** for the VLC engine.
+               - **Audio Track / Language switching**: VLC audio track list; AVPlayer media selection groups.
+               - **Subtitle loading**: pick a local .srt/.vtt file — attaches as a VLC subtitle slave; picks in AVPlayer mode auto-switch to VLC.
+            2. **VLC-style gestures on the video**:
+               - Vertical swipe on the LEFT third = brightness, RIGHT third = volume (VLC engine), middle = swipe down to dismiss.
+            3. Screen brightness is restored on player exit.
+          files: Eentertainment-v5.7.8-iOS.ipa
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
