@@ -49,7 +49,7 @@ final class CineplexScraper {
             var viewCookie = ""
             if let vUrl = URL(string: viewUrlStr) {
             var vReq = URLRequest(url: vUrl)
-            applyActiveUA(to: vReq)
+            applyActiveUA(to: &vReq)
             vReq.setValue("\(baseUrl)/", forHTTPHeaderField: "Referer")
             vReq.timeoutInterval = 8
             do {
@@ -71,7 +71,7 @@ final class CineplexScraper {
 
             guard let pUrl = URL(string: pUrlStr) else { continue }
             var pReq = URLRequest(url: pUrl)
-            applyActiveUA(to: pReq)
+            applyActiveUA(to: &pReq)
             pReq.setValue(viewUrlStr, forHTTPHeaderField: "Referer")
             if !viewCookie.isEmpty {
                 pReq.setValue(viewCookie, forHTTPHeaderField: "Cookie")
@@ -161,7 +161,7 @@ final class CineplexScraper {
     /// Applies the UA strategy that won during search (session default / iOS
     /// Safari / desktop Chrome) so view.php and player.php are fetched the
     /// same way the site accepted.
-    private func applyActiveUA(to request: URLRequest) {
+    private func applyActiveUA(to request: inout URLRequest) {
         if let strategy = activeUAStrategy {
             if let ua = strategy.ua {
                 request.setValue(ua, forHTTPHeaderField: "User-Agent")
