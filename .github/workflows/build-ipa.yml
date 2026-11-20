@@ -54,29 +54,27 @@ jobs:
       - name: Publish Direct IPA to GitHub Releases
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v5.6.2-eentertainment
-          name: "Eentertainment v5.6.2 — RoarZone mediasource_ Emby Fix & Cineplex Realtime BDIX Scraper"
+          tag_name: v5.6.3-eentertainment
+          name: "Eentertainment v5.6.3 — Cineplex HTTP Scheme & Emby PlaybackInfo API Fix"
           body: |
-            ### Eentertainment v5.6.2
+            ### Eentertainment v5.6.3
 
-            🎬 **RoarZone Emby mediasource_ Fix + Cineplex BDIX Realtime Multi-Resolution Scraper + Cookie / Token Auth**
+            🎬 **Cineplex Plain HTTP BDIX Scheme Fix + Emby PlaybackInfo Endpoint Direct Resolution**
 
-            #### What's Fixed in v5.6.2:
-            1. **RoarZone Emby Playback Fix (`mediasource_` parameter)**:
-               - Fixed `MediaSourceId=mediasource_{itemId}` for movies and `MediaSourceId=mediasource_{epId}` for TV series.
-               - Emby no longer returns `HTTP 400 Bad Request`.
-               - AVPlayer now streams HLS master playlist directly with hardware acceleration without triggering `AVPlayerError: resource unavailable`.
-               - Direct stream option updated with `MediaSourceId=mediasource_{id}` for MobileVLCKit.
-            2. **Cineplex BD Scraper Fix (`https://cineplexbd.net`)**:
-               - Upgraded scraper regex to extract movie search results (`view.php?id=...`) and TV series (`watch.php?id=...`) with clean title extraction.
-               - Preserves full Nginx secure link tokens (`?md5=...&expires=...`) for MP4 streams.
-               - Added automatic `Set-Cookie` header capture (`hlse`, `hlsk`, `REDFORCE`) for HLS master streams.
-               - Added proper `Referer` and `Origin` headers required by Cineplex's media gateway.
+            #### What's Fixed in v5.6.3:
+            1. **Cineplex BD Scheme Fix (`http://cineplexbd.net`)**:
+               - Reverted `baseUrl` to plain `http://cineplexbd.net/` to eliminate TLS handshake failures on BDIX ISP networks.
+               - Allowed by iOS via `NSAllowsArbitraryLoads: true` in `Info.plist`.
+               - Realtime scraping for both movies (`player.php`) and TV series (`watch.php`) with MD5 tokens and session cookies.
+            2. **RoarZone Emby Real PlaybackInfo API Resolution**:
+               - Interrogates Emby's `/Items/{itemId}/PlaybackInfo?UserId={userId}&api_key={token}` endpoint after authentication.
+               - Extracts server-authoritative `mediaSourceId`, `Container`, `DirectStreamUrl`, and `TranscodingUrl`.
+               - Direct stream constructed with native container (`stream.mkv` / `stream.mp4`) allowing instant hardware playback in MobileVLCKit / AVPlayer.
             3. **Verified Working Addons**:
                - CTG Movies FTP [BDIX]
-               - RoarZone EMBY [BDIX] (HLS + Direct Stream)
-               - Cineplex BD [BDIX] (MP4 + HLS)
-               - Custom Stremio HTTP Addons (via Settings tab)
+               - RoarZone EMBY [BDIX] (PlaybackInfo Direct Stream)
+               - Cineplex BD [BDIX] (Realtime HTTP BDIX)
+               - Custom Stremio HTTP Addons (Settings tab)
           files: Eentertainment-v5.6-iOS.ipa
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
