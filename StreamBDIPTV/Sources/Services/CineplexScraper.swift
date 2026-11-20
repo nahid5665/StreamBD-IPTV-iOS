@@ -7,67 +7,29 @@ final class CineplexScraper {
 
     private init() {}
 
+    private func sanitizeQuery(_ text: String) -> String {
+        var s = text.replacingOccurrences(of: ":", with: " ")
+            .replacingOccurrences(of: "-", with: " ")
+            .replacingOccurrences(of: "_", with: " ")
+            .replacingOccurrences(of: "'", with: "")
+            .replacingOccurrences(of: "\"", with: "")
+            .replacingOccurrences(of: "&", with: "and")
+        while s.contains("  ") {
+            s = s.replacingOccurrences(of: "  ", with: " ")
+        }
+        return s.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
     /// Scrapes cineplexbd.net in real-time for direct BDIX MP4 / HLS streams
     func resolveStreams(title: String, isTV: Bool = false, season: Int = 1, episode: Int = 1) async -> [StreamSource] {
-        let cleanTitle = title.replacingOccurrences(of: "-", with: " ")
-            .replacingOccurrences(of: "_", with: " ")
-            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let cleanTitle = sanitizeQuery(title)
+        var candidates = await searchCandidates(query: cleanTitle)
 
-        guard let encoded = cleanTitle.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed),
-              let searchUrl = URL(string: "\(baseUrl)/search.php?q=\(encoded)") else {
-            return []
-        }
-
-        var searchReq = URLRequest(url: searchUrl)
-        searchReq.setValue(userAgent, forHTTPHeaderField: "User-Agent")
-        searchReq.timeoutInterval = 7
-
-        guard let (searchData, _) = try? await URLSession.shared.data(for: searchReq),
-              let html = String(data: searchData, encoding: .utf8) else {
-            return []
-        }
-
-        // Extract both view.php?id= (movies) and watch.php?id= (series) along with title from alt attribute
-        let pattern = #"<a\s+href=[\"'](view|watch)\.php\?id=(\d+)[\"'][\s\S]*?<img\s+[^>]*alt=[\"']([^\"']+)[\"']"#
-        var candidates: [(kind: String, id: String, title: String)] = []
-        var seenIds = Set<String>()
-
-        if let regex = try? NSRegularExpression(pattern: pattern, options: [.caseInsensitive]) {
-            let matches = regex.matches(in: html, range: NSRange(html.startIndex..., in: html))
-            for m in matches {
-                guard m.numberOfRanges >= 4,
-                      let r1 = Range(m.range(at: 1), in: html),
-                      let r2 = Range(m.range(at: 2), in: html),
-                      let r3 = Range(m.range(at: 3), in: html) else { continue }
-
-                let kind = String(html[r1])
-                let id = String(html[r2])
-                let matchedTitle = String(html[r3]).trimmingCharacters(in: .whitespacesAndNewlines)
-
-                if seenIds.contains(id) { continue }
-                seenIds.insert(id)
-
-                candidates.append((kind: kind, id: id, title: matchedTitle))
-                if candidates.count >= 4 { break }
-            }
-        }
-
-        // Fallback loose match if card pattern didn't capture enough
-        if candidates.isEmpty {
-            let loosePattern = #"href=[\"'](view|watch)\.php\?id=(\d+)[\"']"#
-            if let looseRegex = try? NSRegularExpression(pattern: loosePattern, options: [.caseInsensitive]) {
-                let matches = looseRegex.matches(in: html, range: NSRange(html.startIndex..., in: html))
-                for m in matches {
-                    guard m.numberOfRanges >= 3,
-                          let r1 = Range(m.range(at: 1), in: html),
-                          let r2 = Range(m.range(at: 2), in: html) else { continue }
-                    let kind = String(html[r1])
-                    let id = String(html[r2])
-                    if seenIds.contains(id) { continue }
-                    seenIds.insert(id)
-                    candidates.append((kind: kind, id: id, title: cleanTitle))
-                    if candidates.count >= 3 { break }
-                }
+        // Fallback: If title has a colon (e.g., "Avatar: The Way of Water" -> "Avatar"), search primary title prefix
+        if candidates.isEmpty && title.contains(":") {
+            let primaryPrefix = sanitizeQuery(title.components(separatedBy: ":").first ?? "")
+            if !primaryPrefix.isEmpty && primaryPrefix != cleanTitle {
+                candidates = await searchCandidates(query: primaryPrefix)
             }
         }
 
@@ -148,5 +110,85 @@ final class CineplexScraper {
         }
 
         return streamSources
+    }
+
+    private func searchCandidates(query: String) async -> [(kind: String, id: String, title: String)] {
+        guard let encoded = query.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed),
+              let searchUrl = URL(string: "\(baseUrl)/search.php?q=\(encoded)") else {
+            return []
+        }
+
+        var searchReq = URLRequest(url: searchUrl)
+        searchReq.setValue(userAgent, forHTTPHeaderField: "User-Agent")
+        searchReq.timeoutInterval = 7
+
+        guard let (searchData, _) = try? await URLSession.shared.data(for: searchReq),
+              let html = String(data: searchData, encoding: .utf8) else {
+            return []
+        }
+
+        var candidates: [(kind: String, id: String, title: String)] = []
+        var seenIds = Set<String>()
+
+        // 1. Flexible card regex matching href="(view|watch).php?id=..." and alt="..." or truncate title
+        let cardPattern = #"<a\b[^>]*?\bhref=[\"'](view|watch)\.php\?id=(\d+)[\"'][^>]*>([\s\S]*?)</a>"#
+        if let cardRegex = try? NSRegularExpression(pattern: cardPattern, options: [.caseInsensitive]) {
+            let matches = cardRegex.matches(in: html, range: NSRange(html.startIndex..., in: html))
+            for m in matches {
+                guard m.numberOfRanges >= 4,
+                      let r1 = Range(m.range(at: 1), in: html),
+                      let r2 = Range(m.range(at: 2), in: html),
+                      let r3 = Range(m.range(at: 3), in: html) else { continue }
+
+                let kind = String(html[r1])
+                let id = String(html[r2])
+                let cardBody = String(html[r3])
+
+                if seenIds.contains(id) { continue }
+
+                // Try to extract title from img alt or truncate span
+                var cardTitle = query
+                let altPattern = #"alt=[\"']([^\"']+)[\"']"#
+                if let altRegex = try? NSRegularExpression(pattern: altPattern, options: [.caseInsensitive]),
+                   let altMatch = altRegex.firstMatch(in: cardBody, range: NSRange(cardBody.startIndex..., in: cardBody)),
+                   altMatch.numberOfRanges > 1,
+                   let altR = Range(altMatch.range(at: 1), in: cardBody) {
+                    cardTitle = String(cardBody[altR]).trimmingCharacters(in: .whitespacesAndNewlines)
+                } else {
+                    let spanPattern = #"<span[^>]*class=[\"'][^\"']*truncate[^\"']*[\"'][^>]*>([^<]+)</span>"#
+                    if let spanRegex = try? NSRegularExpression(pattern: spanPattern, options: [.caseInsensitive]),
+                       let spanMatch = spanRegex.firstMatch(in: cardBody, range: NSRange(cardBody.startIndex..., in: cardBody)),
+                       spanMatch.numberOfRanges > 1,
+                       let spanR = Range(spanMatch.range(at: 1), in: cardBody) {
+                        cardTitle = String(cardBody[spanR]).trimmingCharacters(in: .whitespacesAndNewlines)
+                    }
+                }
+
+                seenIds.insert(id)
+                candidates.append((kind: kind, id: id, title: cardTitle))
+                if candidates.count >= 4 { break }
+            }
+        }
+
+        // 2. Loose fallback if card regex didn't capture enough
+        if candidates.isEmpty {
+            let loosePattern = #"href=[\"'](view|watch)\.php\?id=(\d+)[\"']"#
+            if let looseRegex = try? NSRegularExpression(pattern: loosePattern, options: [.caseInsensitive]) {
+                let matches = looseRegex.matches(in: html, range: NSRange(html.startIndex..., in: html))
+                for m in matches {
+                    guard m.numberOfRanges >= 3,
+                          let r1 = Range(m.range(at: 1), in: html),
+                          let r2 = Range(m.range(at: 2), in: html) else { continue }
+                    let kind = String(html[r1])
+                    let id = String(html[r2])
+                    if seenIds.contains(id) { continue }
+                    seenIds.insert(id)
+                    candidates.append((kind: kind, id: id, title: query))
+                    if candidates.count >= 3 { break }
+                }
+            }
+        }
+
+        return candidates
     }
 }
