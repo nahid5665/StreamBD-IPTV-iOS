@@ -23,16 +23,19 @@ final class BDIXAddonScraper {
         async let ctgTask = resolveCtgMovies(title: title, tmdbId: tmdbId, isTV: isTV, season: season, episode: episode)
         async let roarTask = resolveRoarZone(title: title, isTV: isTV)
         async let vixTask = resolveVixSrc(tmdbId: tmdbId, isTV: isTV, season: season, episode: episode)
+        async let mlbdTask = MovieLinkBDScraper.shared.resolveStreams(title: title, year: year, isTV: isTV, season: season, episode: episode, tmdbId: tmdbId)
 
         let cineplexStreams = await cineplexTask
         let ctgStreams = await ctgTask
         let roarStreams = await roarTask
         let vixStreams = await vixTask
+        let mlbdStreams = await mlbdTask
 
         results.append(contentsOf: cineplexStreams)
         results.append(contentsOf: ctgStreams)
         results.append(contentsOf: roarStreams)
         results.append(contentsOf: vixStreams)
+        results.append(contentsOf: mlbdStreams)
 
         return results
     }
