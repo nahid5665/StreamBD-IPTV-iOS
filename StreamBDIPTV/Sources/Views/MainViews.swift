@@ -911,22 +911,74 @@ struct NetflixMediaDetailSheet: View {
 
                     // Stream Providers & Addon Names
                     VStack(alignment: .leading, spacing: 10) {
-                        Text("Stream Providers & Addons (Eentertainment VOD)")
+                        Text("Addon Availability & Streams")
                             .font(.headline)
                             .foregroundStyle(.white)
                             .padding(.horizontal, 16)
 
-                        if isLoadingStreams {
+                        // Real-Time Addon Status Badges Bar
+                        if !vodVM.addonStates.isEmpty {
+                            ScrollView(.horizontal, showsIndicators: false) {
+                                HStack(spacing: 8) {
+                                    ForEach(Array(vodVM.addonStates.keys).sorted(), id: \.self) { addonName in
+                                        let state = vodVM.addonStates[addonName] ?? .idle
+                                        HStack(spacing: 6) {
+                                            switch state {
+                                            case .loading:
+                                                ProgressView().tint(.white).scaleEffect(0.65)
+                                                Text(addonName).font(.caption2).foregroundStyle(.white.opacity(0.8))
+                                            case .available(let list):
+                                                Image(systemName: "checkmark.circle.fill").font(.caption2).foregroundStyle(.green)
+                                                Text("\(addonName) (\(list.count))").font(.caption2.bold()).foregroundStyle(.white)
+                                            case .unavailable:
+                                                Image(systemName: "minus.circle").font(.caption2).foregroundStyle(.gray)
+                                                Text(addonName).font(.caption2).foregroundStyle(.gray)
+                                            case .failed:
+                                                Image(systemName: "exclamationmark.circle").font(.caption2).foregroundStyle(.orange)
+                                                Text(addonName).font(.caption2).foregroundStyle(.orange.opacity(0.85))
+                                            case .idle:
+                                                EmptyView()
+                                            }
+                                        }
+                                        .padding(.horizontal, 10)
+                                        .padding(.vertical, 6)
+                                        .background(Color.white.opacity(0.08))
+                                        .clipShape(Capsule())
+                                    }
+                                }
+                                .padding(.horizontal, 16)
+                            }
+                        }
+
+                        if isLoadingStreams && availableStreams.isEmpty {
                             HStack(spacing: 10) {
                                 ProgressView().tint(Color(red: 0.4, green: 0.6, blue: 1.0))
-                                Text("Resolving CTG Movies, Cineplex, RoarZone & Addons…")
+                                Text("Checking BDIX servers & addons in parallel…")
                                     .font(.caption)
                                     .foregroundStyle(.gray)
                             }
                             .padding(.horizontal, 16)
-                        } else if availableStreams.isEmpty {
-                            Text("No streams currently found for this title.").font(.caption).foregroundStyle(.red)
-                                .padding(.horizontal, 16)
+                        } else if availableStreams.isEmpty && !isLoadingStreams {
+                            VStack(alignment: .leading, spacing: 8) {
+                                Text("No playable streams found on checked addons for this title.")
+                                    .font(.caption)
+                                    .foregroundStyle(.orange)
+                                Button {
+                                    Task { await loadStreams() }
+                                } label: {
+                                    HStack(spacing: 6) {
+                                        Image(systemName: "arrow.clockwise")
+                                        Text("Retry Addons")
+                                    }
+                                    .font(.caption.bold())
+                                    .foregroundStyle(.white)
+                                    .padding(.horizontal, 12)
+                                    .padding(.vertical, 6)
+                                    .background(Color.white.opacity(0.12))
+                                    .clipShape(Capsule())
+                                }
+                            }
+                            .padding(.horizontal, 16)
                         } else {
                             VStack(spacing: 10) {
                                 ForEach(availableStreams) { source in
@@ -948,7 +1000,7 @@ struct NetflixMediaDetailSheet: View {
 
                                             Spacer()
 
-                                            Text(source.type == "direct" ? "Direct VLC" : "Web Embed")
+                                            Text(source.type == "direct" ? "Direct Play" : "Web Embed")
                                                 .font(.system(size: 10, weight: .bold))
                                                 .foregroundStyle(source.type == "direct" ? Color(red: 0.2, green: 0.9, blue: 0.5) : Color(red: 1.0, green: 0.6, blue: 0.2))
                                                 .padding(.horizontal, 8)
