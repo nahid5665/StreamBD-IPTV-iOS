@@ -1,6 +1,7 @@
 import SwiftUI
 import AVFoundation
 import UIKit
+import MobileVLCKit
 import UniformTypeIdentifiers
 
 /// VLC-style playback options panel: speed, volume, brightness,
@@ -25,100 +26,11 @@ struct PlaybackOptionsSheet: View {
     var body: some View {
         NavigationStack {
             List {
-                Section("Playback Speed") {
-                    Picker("Speed", selection: $speed) {
-                        ForEach(speedOptions, id: \.self) { s in
-                            Text("\(String(format: "%.2f", s))×").tag(s)
-                        }
-                    }
-                    .pickerStyle(.segmented)
-                    .onChange(of: speed) { newValue in
-                        applySpeed(newValue)
-                    }
-                }
-
-                if engine == .vlc {
-                    Section("Volume") {
-                        HStack(spacing: 10) {
-                            Image(systemName: "speaker.fill")
-                                .foregroundStyle(.secondary)
-                            Slider(value: Binding(
-                                get: { Double(vlcVolumePercent) },
-                                set: { newV in
-                                    vlcVolumePercent = Int(newV)
-                                    vlcPlayer?.audio.volume = Int(Float(newV) / 100.0 * 256.0)
-                                }
-                            ), in: 0...100)
-                            Text("\(vlcVolumePercent)%")
-                                .font(.caption.monospacedDigit())
-                                .foregroundStyle(.secondary)
-                        }
-                    }
-                } else {
-                    Section("Volume") {
-                        Text("AVPlayer follows the system volume — use the volume buttons or Control Center.")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-                }
-
-                Section("Brightness") {
-                    HStack(spacing: 10) {
-                        Image(systemName: "sun.max.fill")
-                            .foregroundStyle(.yellow)
-                        Slider(value: Binding(
-                            get: { Double(UIScreen.main.brightness) },
-                            set: { UIScreen.main.brightness = CGFloat($0) }
-                        ), in: 0.05...1.0)
-                    }
-                }
-
-                Section("Audio Track / Language") {
-                    if engine == .vlc {
-                        if vlcAudioOptions.count > 1 {
-                            Picker("Audio Track", selection: $vlcSelectedAudioIndex) {
-                                ForEach(Array(vlcAudioOptions.enumerated()), id: \.offset) { idx, name in
-                                    Text(name).tag(idx)
-                                }
-                            }
-                            .onChange(of: vlcSelectedAudioIndex) { newIndex in
-                                vlcPlayer?.audioTrackIndex = newIndex
-                            }
-                        } else {
-                            Text(vlcAudioOptions.isEmpty ? "No audio track info available yet." : "Only one audio track in this stream.")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                        }
-                    } else {
-                        if avAudioOptions.count > 1 {
-                            Picker("Audio Track", selection: $avSelectedAudioIndex) {
-                                ForEach(Array(avAudioOptions.enumerated()), id: \.offset) { idx, name in
-                                    Text(name).tag(idx)
-                                }
-                            }
-                            .onChange(of: avSelectedAudioIndex) { newIndex in
-                                selectAVAudioTrack(at: newIndex)
-                            }
-                        } else {
-                            Text("No additional audio tracks detected in this stream.")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                        }
-                    }
-                }
-
-                Section("Subtitles") {
-                    Button {
-                        showSubtitleImporter = true
-                    } label: {
-                        Label("Load Subtitle File (.srt / .vtt)", systemImage: "doc.text.badge.plus")
-                    }
-                    if engine == .avPlayer {
-                        Text("Subtitles use the VLC engine — picking one switches automatically.")
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
-                    }
-                }
+                speedSection
+                volumeSection
+                brightnessSection
+                audioSection
+                subtitleSection
             }
             .navigationTitle("Playback Options")
             .navigationBarTitleDisplayMode(.inline)
@@ -139,16 +51,119 @@ struct PlaybackOptionsSheet: View {
             }
             .onAppear {
                 refreshAudioTracks()
-                if engine == .vlc, let p = vlcPlayer {
-                    let raw = p.audio.volume
-                    if raw >= 0 && raw <= 512 {
-                        vlcVolumePercent = Int(Float(raw) / 256.0 * 100.0)
-                    }
-                }
+                syncVlcVolumeFromPlayer()
             }
         }
         .preferredColorScheme(.dark)
     }
+
+    // MARK: - Sections
+
+    private var speedSection: some View {
+        Section("Playback Speed") {
+            Picker("Speed", selection: $speed) {
+                ForEach(speedOptions, id: \.self) { s in
+                    Text("\(String(format: "%.2f", s))×").tag(s)
+                }
+            }
+            .pickerStyle(.segmented)
+            .onChange(of: speed) { newValue in
+                applySpeed(newValue)
+            }
+        }
+    }
+
+    private var volumeSection: some View {
+        Section("Volume") {
+            if engine == .vlc {
+                HStack(spacing: 10) {
+                    Image(systemName: "speaker.fill")
+                        .foregroundStyle(.secondary)
+                    Slider(value: Binding(
+                        get: { Double(vlcVolumePercent) },
+                        set: { newV in
+                            vlcVolumePercent = Int(newV)
+                            vlcPlayer?.audio?.volume = Int32(Float(newV) / 100.0 * 256.0)
+                        }
+                    ), in: 0...100)
+                    Text("\(vlcVolumePercent)%")
+                        .font(.caption.monospacedDigit())
+                        .foregroundStyle(.secondary)
+                }
+            } else {
+                Text("AVPlayer follows the system volume — use the volume buttons or Control Center.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    private var brightnessSection: some View {
+        Section("Brightness") {
+            HStack(spacing: 10) {
+                Image(systemName: "sun.max.fill")
+                    .foregroundStyle(.yellow)
+                Slider(value: Binding(
+                    get: { Double(UIScreen.main.brightness) },
+                    set: { UIScreen.main.brightness = CGFloat($0) }
+                ), in: 0.05...1.0)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var audioSection: some View {
+        Section("Audio Track / Language") {
+            if engine == .vlc {
+                if vlcAudioOptions.count > 1 {
+                    Picker("Audio Track", selection: $vlcSelectedAudioIndex) {
+                        ForEach(Array(vlcAudioOptions.enumerated()), id: \.offset) { idx, name in
+                            Text(name).tag(idx)
+                        }
+                    }
+                    .onChange(of: vlcSelectedAudioIndex) { newIndex in
+                        vlcPlayer?.audioTrackIndex = newIndex
+                    }
+                } else {
+                    Text(vlcAudioOptions.isEmpty ? "No audio track info available yet." : "Only one audio track in this stream.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            } else {
+                if avAudioOptions.count > 1 {
+                    Picker("Audio Track", selection: $avSelectedAudioIndex) {
+                        ForEach(Array(avAudioOptions.enumerated()), id: \.offset) { idx, name in
+                            Text(name).tag(idx)
+                        }
+                    }
+                    .onChange(of: avSelectedAudioIndex) { newIndex in
+                        selectAVAudioTrack(at: newIndex)
+                    }
+                } else {
+                    Text("No additional audio tracks detected in this stream.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+        }
+    }
+
+    private var subtitleSection: some View {
+        Section("Subtitles") {
+            Button {
+                showSubtitleImporter = true
+            } label: {
+                Label("Load Subtitle File (.srt / .vtt)", systemImage: "doc.text.badge.plus")
+            }
+            if engine == .avPlayer {
+                Text("Subtitles use the VLC engine — picking one switches automatically.")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    // MARK: - Actions
 
     private func applySpeed(_ s: Float) {
         if let ap = avPlayer {
@@ -158,6 +173,14 @@ struct PlaybackOptionsSheet: View {
             }
         }
         vlcPlayer?.rate = s
+    }
+
+    private func syncVlcVolumeFromPlayer() {
+        guard engine == .vlc, let p = vlcPlayer else { return }
+        let raw = p.audio?.volume ?? -1
+        if raw >= 0 && raw <= 512 {
+            vlcVolumePercent = Int(Float(raw) / 256.0 * 100.0)
+        }
     }
 
     private func refreshAudioTracks() {
@@ -172,8 +195,8 @@ struct PlaybackOptionsSheet: View {
             if let group = try? item.asset.mediaSelectionGroup(forMediaCharacteristic: .audible) {
                 let options = group.options
                 avAudioOptions = options.map { $0.displayName }
-                if let current = item.currentMediaSelection(for: group),
-                   let idx = options.firstIndex(of: current) {
+                let current = item.currentMediaSelection.selectedOption(in: group)
+                if let current, let idx = options.firstIndex(of: current) {
                     avSelectedAudioIndex = idx
                 }
             }
@@ -184,6 +207,6 @@ struct PlaybackOptionsSheet: View {
         guard let item = avPlayer?.currentItem,
               let group = try? item.asset.mediaSelectionGroup(forMediaCharacteristic: .audible),
               index < group.options.count else { return }
-        item.select(option: group.options[index], in: group)
+        item.select(group.options[index], in: group)
     }
 }

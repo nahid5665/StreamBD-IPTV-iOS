@@ -104,6 +104,7 @@ class VLCVideoContainerView: UIView {
 struct VLCPlayerView: UIViewRepresentable {
     let url: URL
     let headers: [String: String]
+    var subtitlePath: String? = nil
     @Binding var player: VLCMediaPlayer?
     var onStateChanged: ((VLCMediaPlayerState) -> Void)? = nil
     var onTimeChanged: ((VLCTime, VLCTime) -> Void)? = nil
@@ -117,6 +118,7 @@ struct VLCPlayerView: UIViewRepresentable {
         var parent: VLCPlayerView
         var player: VLCMediaPlayer?
         var currentUrl: URL?
+        var currentSubtitlePath: String?
 
         init(_ parent: VLCPlayerView) {
             self.parent = parent
@@ -146,8 +148,9 @@ struct VLCPlayerView: UIViewRepresentable {
         view.player = mediaPlayer
         view.onTap = onTap
 
-        loadMedia(into: mediaPlayer, url: url, headers: headers)
+        loadMedia(into: mediaPlayer, url: url, headers: headers, subtitlePath: subtitlePath)
         context.coordinator.currentUrl = url
+        context.coordinator.currentSubtitlePath = subtitlePath
 
         DispatchQueue.main.async {
             self.player = mediaPlayer
@@ -159,10 +162,11 @@ struct VLCPlayerView: UIViewRepresentable {
     func updateUIView(_ uiView: VLCVideoContainerView, context: Context) {
         uiView.player = context.coordinator.player
         uiView.onTap = onTap
-        if context.coordinator.currentUrl != url {
+        if context.coordinator.currentUrl != url || context.coordinator.currentSubtitlePath != subtitlePath {
             context.coordinator.currentUrl = url
+            context.coordinator.currentSubtitlePath = subtitlePath
             if let p = context.coordinator.player {
-                loadMedia(into: p, url: url, headers: headers)
+                loadMedia(into: p, url: url, headers: headers, subtitlePath: subtitlePath)
                 DispatchQueue.main.async {
                     p.play()
                 }
@@ -177,7 +181,7 @@ struct VLCPlayerView: UIViewRepresentable {
         uiView.player = nil
     }
 
-    private func loadMedia(into player: VLCMediaPlayer, url: URL, headers: [String: String]) {
+    private func loadMedia(into player: VLCMediaPlayer, url: URL, headers: [String: String], subtitlePath: String?) {
         let media = VLCMedia(url: url)
         media.addOption(":network-caching=3000")
         media.addOption(":clock-jitter=0")
@@ -193,6 +197,10 @@ struct VLCPlayerView: UIViewRepresentable {
 
         if let cookie = headers["Cookie"] ?? headers["cookie"] {
             media.addOption(":http-cookie=\(cookie)")
+        }
+
+        if let subtitlePath, !subtitlePath.isEmpty {
+            media.addOption(":sub-file=\(subtitlePath)")
         }
 
         player.media = media
@@ -242,6 +250,7 @@ struct UniversalFullScreenPlayerView: View {
     @State private var gestureStartBrightness: CGFloat = UIScreen.main.brightness
     @State private var brightnessAtOpen: CGFloat = UIScreen.main.brightness
     @State private var vlcVolumePercent: Int = 100
+    @State private var pendingSubtitlePath: String? = nil
 
     private var shouldUseVLC: Bool {
         let lower = url.absoluteString.lowercased()
@@ -273,6 +282,7 @@ struct UniversalFullScreenPlayerView: View {
                 VLCPlayerView(
                     url: url,
                     headers: headers,
+                    subtitlePath: pendingSubtitlePath,
                     player: $vlcPlayer,
                     onStateChanged: { state in
                         isPlaying = (state == .playing)
@@ -462,7 +472,7 @@ struct UniversalFullScreenPlayerView: View {
                     } else if startX > w * 2 / 3, currentEngine == .vlc, let p = vlcPlayer {
                         let delta = Int(dy / 4.0)
                         let newV = min(100, max(0, vlcVolumePercent + delta))
-                        p.audio.volume = Int(Float(newV) / 100.0 * 256.0)
+                        p.audio?.volume = Int32(Float(newV) / 100.0 * 256.0)
                         vlcVolumePercent = newV
                         gestureHUDText = "🔊 \(newV)%"
                     }
@@ -784,9 +794,10 @@ struct UniversalFullScreenPlayerView: View {
         }
     }
 
-    /// Loads a locally picked subtitle file into the VLC engine. External
-    /// subtitle slaves are a VLC capability, so an AVPlayer session
-    /// transparently switches engines first.
+    /// Loads a locally picked subtitle file into the VLC engine via the
+    /// core `:sub-file` media option (guaranteed across VLCKit builds).
+    /// External subtitle slaves are a VLC capability, so an AVPlayer
+    /// session transparently switches engines first.
     private func handleSubtitleSelection(_ securityURL: URL) {
         let accessing = securityURL.startAccessingSecurityScopedResource()
         defer { if accessing { securityURL.stopAccessingSecurityScopedResource() } }
@@ -796,19 +807,21 @@ struct UniversalFullScreenPlayerView: View {
             try? FileManager.default.removeItem(at: tmp)
             try FileManager.default.copyItem(at: securityURL, to: tmp)
 
-            if currentEngine == .avPlayer {
-                switchEngine(to: .vlc)
-                statusToast = "Subtitles use the VLC engine — switched to VLC."
-            }
-
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) {
-                if let media = self.vlcPlayer?.media {
-                    _ = media.addSlave(ofType: .subtitle, to: tmp, at: 0)
-                    statusToast = "Subtitle loaded: \(tmp.lastPathComponent)"
-                } else {
-                    statusToast = "No media to attach the subtitle to"
+            pendingSubtitlePath = tmp.path
+            if currentEngine != .vlc {
+                // Switch engines; the fresh VLC session picks up :sub-file.
+                stopPlayback()
+                withAnimation(.easeInOut) {
+                    currentEngine = .vlc
                 }
+                setupPlayer()
+            } else {
+                // Already VLC: bump the url view so updateUIView reloads the
+                // media with the new subtitle option.
+                stopPlayback()
+                setupPlayer()
             }
+            statusToast = "Subtitle loaded: \(tmp.lastPathComponent)"
         } catch {
             statusToast = "Subtitle import failed: \(error.localizedDescription)"
         }
@@ -937,6 +950,7 @@ struct StreamPlayerSheet: View {
                         VLCPlayerView(
                             url: streamURL,
                             headers: activeHeaders,
+                            subtitlePath: nil,
                             player: $vlcPlayer,
                             onStateChanged: { state in
                                 handlePlayerState(state)
