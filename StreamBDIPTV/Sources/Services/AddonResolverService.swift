@@ -29,23 +29,30 @@ final class AddonResolverService {
                 return await self.resolveStremioProtocol(addon: addon, context: context)
             }
 
-            // 3. Dynamic JavaScript VOD Plugin (*.js)
-            if url.hasSuffix(".js") || addon.url.hasSuffix(".js") {
-                let jsStreams = (try? await JSVODAddonRunner.shared.resolveStreams(addon: addon, context: context)) ?? []
-                if !jsStreams.isEmpty {
-                    return jsStreams
-                }
-            }
-
-            // 4. Swift Native Fallbacks (if JS engine returned empty or not a .js addon)
-            // Cineplex BD [BDIX]
+            // 3. Cineplex BD [BDIX] - Fast Native Resolver with 2-Step View->Player Session & Sanitized Search
             if lowerId.contains("cineplex") || lowerName.contains("cineplex") {
-                return await CineplexScraper.shared.resolveStreams(
+                let nativeStreams = await CineplexScraper.shared.resolveStreams(
                     title: context.title,
                     isTV: context.isTV,
                     season: context.season ?? 1,
                     episode: context.episode ?? 1
                 )
+                if !nativeStreams.isEmpty {
+                    return nativeStreams
+                }
+                // Fallback to JS runner if native returned empty
+                if url.hasSuffix(".js") || addon.url.hasSuffix(".js") {
+                    return (try? await JSVODAddonRunner.shared.resolveStreams(addon: addon, context: context)) ?? []
+                }
+                return []
+            }
+
+            // 4. Dynamic JavaScript VOD Plugins (*.js)
+            if url.hasSuffix(".js") || addon.url.hasSuffix(".js") {
+                let jsStreams = (try? await JSVODAddonRunner.shared.resolveStreams(addon: addon, context: context)) ?? []
+                if !jsStreams.isEmpty {
+                    return jsStreams
+                }
             }
 
             // CTG Movies FTP [BDIX]
