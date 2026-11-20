@@ -22,6 +22,61 @@ final class VODViewModel: ObservableObject {
     private var imdbIdCache: [Int: String] = [:]
     private var activeLookupTask: Task<Void, Never>? = nil
 
+    private let customAddonsKey = "eentertainment_custom_addons_v2"
+    private let disabledAddonsKey = "eentertainment_disabled_addons_v2"
+
+    init() {
+        loadAddons()
+    }
+
+    func loadAddons() {
+        var list = AppConfig.bundledAddons
+        if let data = UserDefaults.standard.data(forKey: customAddonsKey),
+           let custom = try? JSONDecoder().decode([Addon].self, from: data) {
+            list.append(contentsOf: custom)
+        }
+        let disabled = Set(UserDefaults.standard.stringArray(forKey: disabledAddonsKey) ?? [])
+        for i in 0..<list.count {
+            if disabled.contains(list[i].id) {
+                list[i].enabled = false
+            }
+        }
+        self.addons = list
+    }
+
+    func toggleAddon(id: String) {
+        if let idx = addons.firstIndex(where: { $0.id == id }) {
+            addons[idx].enabled.toggle()
+            saveAddonPreferences()
+        }
+    }
+
+    func addCustomStremioAddon(name: String, url: String) {
+        let clean = url.trimmingCharacters(in: .whitespacesAndNewlines)
+        let id = "stremio_\(UUID().uuidString.prefix(8))"
+        let addon = Addon(id: id, name: name, url: clean, enabled: true, type: "stremio")
+        addons.append(addon)
+        saveCustomAddons()
+    }
+
+    func removeCustomAddon(id: String) {
+        addons.removeAll { $0.id == id }
+        saveCustomAddons()
+        saveAddonPreferences()
+    }
+
+    private func saveCustomAddons() {
+        let custom = addons.filter { $0.id.hasPrefix("stremio_") }
+        if let data = try? JSONEncoder().encode(custom) {
+            UserDefaults.standard.set(data, forKey: customAddonsKey)
+        }
+    }
+
+    private func saveAddonPreferences() {
+        let disabled = addons.filter { !$0.enabled }.map { $0.id }
+        UserDefaults.standard.set(disabled, forKey: disabledAddonsKey)
+    }
+
     func loadCatalog() async {
         guard trendingMovies.isEmpty else { return }
         isLoading = true
@@ -62,7 +117,11 @@ final class VODViewModel: ObservableObject {
         self.top10Media = Array(((await top)?.results ?? loadedMovies).prefix(10))
 
         if let fetchedAddons = await remoteAddons, !fetchedAddons.isEmpty {
-            self.addons = fetchedAddons
+            for fa in fetchedAddons {
+                if !self.addons.contains(where: { $0.id == fa.id }) {
+                    self.addons.append(fa)
+                }
+            }
         }
 
         if self.featuredMedia == nil {
