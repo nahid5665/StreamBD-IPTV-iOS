@@ -29,8 +29,8 @@ targets:
         CFBundleDisplayName: "Eentertainment"
         CFBundleName: "Eentertainment"
         CFBundleIdentifier: "com.eentertainment.app"
-        CFBundleShortVersionString: "5.4"
-        CFBundleVersion: "54"
+        CFBundleShortVersionString: "5.5"
+        CFBundleVersion: "55"
         LSRequiresIPhoneOS: true
         UILaunchScreen:
           UIColorName: ""
@@ -52,8 +52,8 @@ targets:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.eentertainment.app
         PRODUCT_NAME: Eentertainment
-        MARKETING_VERSION: "5.4"
-        CURRENT_PROJECT_VERSION: "54"
+        MARKETING_VERSION: "5.5"
+        CURRENT_PROJECT_VERSION: "55"
         SWIFT_VERSION: "5.9"
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         CODE_SIGN_IDENTITY: ""
