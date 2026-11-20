@@ -1,7 +1,27 @@
 import SwiftUI
 import AVKit
 import AVFoundation
+import MediaPlayer
 import VLCKit
+
+// MARK: - System Volume Slider (AVPlayer engine: routes to system volume)
+struct SystemVolumeSlider: UIViewRepresentable {
+    func makeUIView(context: Context) -> MPVolumeView {
+        let view = MPVolumeView(frame: .zero)
+        view.tintColor = .white
+        view.clipsToBounds = false
+        for sub in view.subviews where sub is UILabel {
+            sub.isHidden = true
+        }
+        return view
+    }
+
+    func updateUIView(_ uiView: MPVolumeView, context: Context) {
+        for sub in uiView.subviews where sub is UILabel {
+            sub.isHidden = true
+        }
+    }
+}
 
 // MARK: - AVPlayer Container View (With Native Tap Recognizer)
 
@@ -297,6 +317,9 @@ struct UniversalFullScreenPlayerView: View {
                     },
                     onTimeChanged: { curr, total in
                         guard !isScrubbing else { return }
+                        // Frames advancing means playback is live: clear any
+                        // stuck buffering indicator.
+                        isBuffering = false
                         currentTimeText = curr.stringValue
                         totalTimeText = total.stringValue
                         if let p = vlcPlayer {
@@ -401,34 +424,7 @@ struct UniversalFullScreenPlayerView: View {
                 .zIndex(160)
             }
 
-            // Permanent Top-Left Frosted Close/Back Button (ALWAYS VISIBLE & ACCESSIBLE)
-            VStack {
-                HStack {
-                    Button {
-                        stopAndDismiss()
-                    } label: {
-                        HStack(spacing: 5) {
-                            Image(systemName: "chevron.left")
-                                .font(.system(size: 15, weight: .bold))
-                            Text("Back")
-                                .font(.subheadline.weight(.semibold))
-                        }
-                        .foregroundStyle(.white)
-                        .padding(.horizontal, 14)
-                        .padding(.vertical, 8)
-                        .background(.ultraThinMaterial)
-                        .background(Color.black.opacity(0.6))
-                        .clipShape(Capsule())
-                        .shadow(color: .black.opacity(0.4), radius: 6, x: 0, y: 2)
-                    }
-                    .padding(.leading, 18)
-                    .padding(.top, 46)
-
-                    Spacer()
-                }
-                Spacer()
-            }
-            .zIndex(200)
+            // Back button lives inside the controls HUD (visible on tap).
 
             // Complete Interactive HUD Controls Overlay
             if showControls {
@@ -536,8 +532,18 @@ struct UniversalFullScreenPlayerView: View {
         VStack {
             // Top Bar
             HStack(spacing: 12) {
-                // Spacing for permanent Back button
-                Spacer().frame(width: 80)
+                // Simple back arrow (HUD-only, appears when tapping the screen)
+                Button {
+                    stopAndDismiss()
+                } label: {
+                    Image(systemName: "chevron.left")
+                        .font(.system(size: 17, weight: .bold))
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 7)
+                        .background(.ultraThinMaterial)
+                        .clipShape(Capsule())
+                }
 
                 VStack(alignment: .leading, spacing: 2) {
                     Text(title)
@@ -645,6 +651,33 @@ struct UniversalFullScreenPlayerView: View {
 
             // Bottom Timeline & Scrubber Bar
             VStack(spacing: 8) {
+                // VLC-style volume row (speaker + slider)
+                HStack(spacing: 10) {
+                    Image(systemName: vlcVolumePercent == 0 ? "speaker.slash.fill" : "speaker.wave.2.fill")
+                        .font(.system(size: 14))
+                        .foregroundStyle(.white.opacity(0.9))
+                        .frame(width: 24)
+
+                    if currentEngine == .vlc {
+                        Slider(value: Binding(
+                            get: { Double(vlcVolumePercent) },
+                            set: { newV in
+                                vlcVolumePercent = Int(newV)
+                                vlcPlayer?.audio?.volume = Int32(Float(newV) / 100.0 * 256.0)
+                            }
+                        ), in: 0...100)
+                            .tint(Color(red: 0.35, green: 0.55, blue: 1.0))
+                        Text("\(vlcVolumePercent)%")
+                            .font(.caption2.monospacedDigit())
+                            .foregroundStyle(.white.opacity(0.85))
+                            .frame(width: 38, alignment: .trailing)
+                    } else {
+                        SystemVolumeSlider()
+                            .frame(height: 28)
+                    }
+                }
+                .padding(.horizontal, 4)
+
                 if !isLive {
                     Slider(
                         value: $progressValue,

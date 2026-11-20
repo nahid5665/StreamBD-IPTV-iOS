@@ -824,11 +824,11 @@ struct NetflixMediaDetailSheet: View {
     @ObservedObject var vodVM: VODViewModel
     @Environment(\.dismiss) private var dismiss
 
-    @State private var availableStreams: [StreamSource] = []
+    // Live addon results: bound directly to vodVM.availableStreams so streams
+    // appear progressively as each addon resolves (not all at once at the end).
     @State private var activePlayback: PlaybackRequest? = nil
     @State private var playbackAlertText: String? = nil
     @State private var showPlaybackAlert: Bool = false
-    @State private var isLoadingStreams = true
     @State private var selectedSeason = 1
     @State private var selectedEpisode = 1
     @State private var seasons: [TmdbSeason] = []
@@ -874,7 +874,7 @@ struct NetflixMediaDetailSheet: View {
 
                     // Main Action Play Button
                     Button {
-                        if let first = availableStreams.first {
+                        if let first = vodVM.availableStreams.first {
                             playSource(first)
                         }
                     } label: {
@@ -953,7 +953,7 @@ struct NetflixMediaDetailSheet: View {
                             }
                         }
 
-                        if isLoadingStreams && availableStreams.isEmpty {
+                        if vodVM.isResolvingAddons && vodVM.availableStreams.isEmpty {
                             HStack(spacing: 10) {
                                 ProgressView().tint(Color(red: 0.4, green: 0.6, blue: 1.0))
                                 Text("Checking BDIX servers & addons in parallel…")
@@ -961,7 +961,7 @@ struct NetflixMediaDetailSheet: View {
                                     .foregroundStyle(.gray)
                             }
                             .padding(.horizontal, 16)
-                        } else if availableStreams.isEmpty && !isLoadingStreams {
+                        } else if vodVM.availableStreams.isEmpty && !vodVM.isResolvingAddons {
                             VStack(alignment: .leading, spacing: 8) {
                                 Text("No playable streams found on checked addons for this title.")
                                     .font(.caption)
@@ -984,7 +984,7 @@ struct NetflixMediaDetailSheet: View {
                             .padding(.horizontal, 16)
                         } else {
                             VStack(spacing: 10) {
-                                ForEach(availableStreams) { source in
+                                ForEach(vodVM.availableStreams) { source in
                                     Button {
                                         playSource(source)
                                     } label: {
@@ -1127,7 +1127,6 @@ struct NetflixMediaDetailSheet: View {
     }
 
     private func loadStreams() async {
-        isLoadingStreams = true
         if !media.isMovie && seasons.isEmpty {
             seasons = await vodVM.fetchTvSeasons(tvId: media.id)
             if let first = seasons.first {
@@ -1135,8 +1134,8 @@ struct NetflixMediaDetailSheet: View {
                 episodes = await vodVM.fetchSeasonEpisodes(tvId: media.id, seasonNumber: first.season_number)
             }
         }
-        availableStreams = await vodVM.resolveStreams(for: media, season: selectedSeason, episode: selectedEpisode)
-        isLoadingStreams = false
+        // Results stream into vodVM.availableStreams live as each addon resolves.
+        _ = await vodVM.resolveStreams(for: media, season: selectedSeason, episode: selectedEpisode)
     }
 
     private func playSource(_ source: StreamSource) {
@@ -1388,19 +1387,19 @@ struct SettingsNetflixView: View {
                             .font(.headline)
                             .foregroundStyle(.white)
 
-                        Text("Enter any standard Stremio manifest URL (e.g. https://.../manifest.json)")
+                        Text("Paste any addon URL — a .js scraper addon (e.g. https://cdn.jsdelivr.net/gh/.../addons/movielinkbd.js) or a Stremio manifest (https://.../manifest.json)")
                             .font(.caption2)
                             .foregroundStyle(.secondary)
 
                         VStack(spacing: 12) {
-                            TextField("Addon Name (e.g. Torrentio, Cinemeta)", text: $newAddonName)
+                            TextField("Addon Name (e.g. MovieLinkBD)", text: $newAddonName)
                                 .textFieldStyle(.plain)
                                 .padding(12)
                                 .background(Color.white.opacity(0.08))
                                 .clipShape(RoundedRectangle(cornerRadius: 10))
                                 .foregroundStyle(.white)
 
-                            TextField("Manifest URL (https://.../manifest.json)", text: $newAddonUrl)
+                            TextField("Addon URL (.js scraper or /manifest.json)", text: $newAddonUrl)
                                 .textFieldStyle(.plain)
                                 .textInputAutocapitalization(.never)
                                 .autocorrectionDisabled(true)
@@ -1415,7 +1414,7 @@ struct SettingsNetflixView: View {
                             } label: {
                                 HStack(spacing: 6) {
                                     Image(systemName: "arrow.down.circle.fill")
-                                    Text("Install Stremio Addon")
+                                    Text("Install Addon")
                                         .font(.subheadline.bold())
                                 }
                                 .frame(maxWidth: .infinity)
@@ -1492,7 +1491,7 @@ struct SettingsNetflixView: View {
                                     Spacer()
 
                                     // Custom user addon can be deleted
-                                    if addon.id.hasPrefix("stremio_") {
+                                    if addon.id.hasPrefix("stremio_") || addon.id.hasPrefix("js_") {
                                         Button {
                                             vodVM.removeCustomAddon(id: addon.id)
                                         } label: {
@@ -1625,14 +1624,24 @@ struct SettingsNetflixView: View {
             return
         }
 
-        let manifestUrl = trimmed.hasSuffix("/manifest.json") ? trimmed : (trimmed.hasSuffix("/") ? "\(trimmed)manifest.json" : "\(trimmed)/manifest.json")
-        let name = newAddonName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "Stremio Addon" : newAddonName
+        let name = newAddonName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "Custom Addon" : newAddonName
 
-        vodVM.addCustomStremioAddon(name: name, url: manifestUrl)
-        newAddonName = ""
-        newAddonUrl = ""
-        addonAlert = "Installed \(name) successfully!"
-        showAddonAlert = true
+        if trimmed.lowercased().hasSuffix(".js") {
+            // Plain JS scraper addon (streambd-libs style, jsdelivr/github.io/etc.)
+            vodVM.addCustomJSAddon(name: name, url: trimmed)
+            newAddonName = ""
+            newAddonUrl = ""
+            addonAlert = "Installed \(name) as a JS addon!"
+            showAddonAlert = true
+        } else {
+            // Stremio protocol manifest
+            let manifestUrl = trimmed.hasSuffix("/manifest.json") ? trimmed : (trimmed.hasSuffix("/") ? "\(trimmed)manifest.json" : "\(trimmed)/manifest.json")
+            vodVM.addCustomStremioAddon(name: name, url: manifestUrl)
+            newAddonName = ""
+            newAddonUrl = ""
+            addonAlert = "Installed \(name) as a Stremio addon!"
+            showAddonAlert = true
+        }
     }
 }
 

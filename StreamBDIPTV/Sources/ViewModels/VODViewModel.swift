@@ -59,6 +59,17 @@ final class VODViewModel: ObservableObject {
         saveCustomAddons()
     }
 
+    /// Adds a plain JS playlist/VOD addon (any URL ending in .js, e.g. a
+    /// jsdelivr/github.io hosted streambd-libs script). Executed by the
+    /// QuickJS/WebView runner like bundled addons.
+    func addCustomJSAddon(name: String, url: String) {
+        let clean = url.trimmingCharacters(in: .whitespacesAndNewlines)
+        let id = "js_\(UUID().uuidString.prefix(8))"
+        let addon = Addon(id: id, name: name, url: clean, enabled: true, type: "default")
+        addons.append(addon)
+        saveCustomAddons()
+    }
+
     func removeCustomAddon(id: String) {
         addons.removeAll { $0.id == id }
         saveCustomAddons()

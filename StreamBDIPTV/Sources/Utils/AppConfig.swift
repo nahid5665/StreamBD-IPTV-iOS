@@ -10,7 +10,7 @@ struct EmbeddedPlaylist: Hashable, Identifiable {
 
 enum AppConfig {
     static let appName = "Eentertainment"
-    static let appVersion = "v5.7.9"
+    static let appVersion = "v5.8.0"
 
     /// Verbose addon-pipeline logging (fetch bridge, scrapers, prewarm).
     /// Visible in Console.app / idevicesyslog under the app process.
@@ -85,30 +85,10 @@ enum AppConfig {
         EmbeddedPlaylist(name: "YouTube TV", url: "https://pastebin.com/raw/HYjN3KfA", logo: "", category: "International")
     ]
 
-    // ALL 24 STREAMBD VOD ADDON SCRAPERS
+    // USER-SELECTED BUNDLED ADDONS (native resolvers; more can be added in Settings)
     static let bundledAddons: [Addon] = [
         Addon(id: "cineplexbd_parser", name: "Cineplex BD (BDIX)", url: "https://myselfhridoy.github.io/streambd-libs/addons/cineplexbd.js", enabled: true),
         Addon(id: "ctgmovies", name: "CTG Movies FTP (BDIX)", url: "https://myselfhridoy.github.io/streambd-libs/addons/ctgmovies.js", enabled: true),
-        Addon(id: "netmirror_parser", name: "Net Mirror", url: "https://myselfhridoy.github.io/streambd-libs/addons/netmirror.js", enabled: true),
-        Addon(id: "11plusweb_parser", name: "11Plus WEB", url: "https://myselfhridoy.github.io/streambd-libs/addons/11plusweb.js", enabled: true),
-        Addon(id: "timepassbdcdn_parser", name: "TimePassBD CDN", url: "https://myselfhridoy.github.io/streambd-libs/addons/timepassbdcdn.js", enabled: true),
-        Addon(id: "ibccl-ftp", name: "IBCCL FTP", url: "https://myselfhridoy.github.io/streambd-libs/addons/ibccl-ftp.js", enabled: true),
-        Addon(id: "cinefreak", name: "CineFreak", url: "https://myselfhridoy.github.io/streambd-libs/addons/cinefreak.js", enabled: true),
-        Addon(id: "movielinkbd", name: "MovieLinkBD", url: "https://myselfhridoy.github.io/streambd-libs/addons/movielinkbd.js", enabled: true),
-        Addon(id: "hdhub4u_parser", name: "HDHub4U", url: "https://myselfhridoy.github.io/streambd-libs/addons/hdhub4u.js", enabled: true),
-        Addon(id: "ftpbdweb_parser", name: "FTPBD WEB", url: "https://myselfhridoy.github.io/streambd-libs/addons/ftpbdweb.js", enabled: true),
-        Addon(id: "ftpbdcdn_parser", name: "FTPBD CDN", url: "https://myselfhridoy.github.io/streambd-libs/addons/ftpbdcdn.js", enabled: true),
-        Addon(id: "vixsrc_parser", name: "VixSrc", url: "https://myselfhridoy.github.io/streambd-libs/addons/vixsrc.js", enabled: true),
-        Addon(id: "ppcine_parser", name: "PPCine", url: "https://myselfhridoy.github.io/streambd-libs/addons/ppcine.js", enabled: true),
-        Addon(id: "moviebox_parser", name: "MovieBox", url: "https://myselfhridoy.github.io/streambd-libs/addons/moviebox.js", enabled: true),
-        Addon(id: "cinetv_parser", name: "CineTV", url: "https://myselfhridoy.github.io/streambd-libs/addons/cinetv.js", enabled: true),
-        Addon(id: "bingr_parser", name: "Bingr", url: "https://myselfhridoy.github.io/streambd-libs/addons/bingr-one.js", enabled: true),
-        Addon(id: "vidbolt_parser", name: "VidBolt", url: "https://myselfhridoy.github.io/streambd-libs/addons/vidbolt.js", enabled: true),
-        Addon(id: "vidnest_parser", name: "VidNest", url: "https://myselfhridoy.github.io/streambd-libs/addons/vidnest.js", enabled: true),
-        Addon(id: "roarzone-emby", name: "RoarZone EMBY", url: "https://myselfhridoy.github.io/streambd-libs/addons/roarzone-emby.js", enabled: true),
-        Addon(id: "rtally_parser", name: "Rtally", url: "https://myselfhridoy.github.io/streambd-libs/addons/rtally.js", enabled: true),
-        Addon(id: "royalflic_parser", name: "RoyalFlix", url: "https://myselfhridoy.github.io/streambd-libs/addons/royalflix.js", enabled: true),
-        Addon(id: "omh_parser", name: "Online Movies Hindi", url: "https://myselfhridoy.github.io/streambd-libs/addons/OMH.js", enabled: true),
-        Addon(id: "nhd_parser", name: "NHD API", url: "https://myselfhridoy.github.io/streambd-libs/addons/NHD.js", enabled: true)
+        Addon(id: "roarzone-emby", name: "RoarZone EMBY", url: "https://myselfhridoy.github.io/streambd-libs/addons/roarzone-emby.js", enabled: true)
     ]
 }

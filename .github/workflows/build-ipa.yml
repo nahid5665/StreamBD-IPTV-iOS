@@ -42,37 +42,38 @@ jobs:
         run: |
           mkdir -p Payload
           cp -r build/Build/Products/Release-iphoneos/Eentertainment.app Payload/
-          zip -r9 Eentertainment-v5.7.9-iOS.ipa Payload
+          zip -r9 Eentertainment-v5.8.0-iOS.ipa Payload
 
       - name: Upload Unsigned IPA Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: Eentertainment-v5.7.9-iOS-IPA
-          path: Eentertainment-v5.7.9-iOS.ipa
+          name: Eentertainment-v5.8.0-iOS-IPA
+          path: Eentertainment-v5.8.0-iOS.ipa
           if-no-files-found: error
 
       - name: Publish Direct IPA to GitHub Releases
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v5.7.9-eentertainment
-          name: "Eentertainment v5.7.9 — 10 More Addons Fixed (return-style) + 8x Faster Lookups"
+          tag_name: v5.8.0-eentertainment
+          name: "Eentertainment v5.8.0 — Focused Addons, Live Results, VLC-Style HUD & Custom JS Addons"
           body: |
-            ### Eentertainment v5.7.9
+            ### Eentertainment v5.8.0
 
-            🚀 **Addons 11-20 unlocked + much faster movie pages**
+            ✨ **Faster, cleaner, more VLC-like**
 
-            #### What's Fixed in v5.7.9:
-            1. **Top-level `return` addons now work (APK-parity)**:
-               - 10 addons (hdhub4u, NHD, ppcine, rtally, cinetv, ftpbdcdn, ftpbdweb,
-                 ibccl-ftp, OMH, timepassbdweb) end with `return fn;` — only legal when
-                 the host wraps the script in a function (as Android does). The runner
-                 now wraps every addon in an IIFE and captures the returned function
-                 into module.exports. These addons previously threw SyntaxError.
-            2. **XMLHttpRequest shim** (netmirror, ibccl-ftp): XHR requests now route
-               through the native fetch bridge instead of being CORS-blocked.
-            3. **Faster movie pages**:
-               - JS addon concurrency raised 3 → 8 (WebViews are lightweight).
-               - 10-minute per-addon result cache: revisiting a title is instant.
-          files: Eentertainment-v5.7.9-iOS.ipa
+            #### What's Changed in v5.8.0:
+            1. **Focused addon set**: bundled addons trimmed to Cineplex BD (BDIX), CTG Movies FTP and
+               RoarZone EMBY — the movie page now checks 3 sources instead of 23.
+            2. **Live stream results**: links appear in the movie page the moment each addon finds
+               them (no more waiting for every addon to finish before anything shows).
+            3. **Buffering spinner fix**: the loading indicator now clears as soon as frames advance.
+            4. **Player HUD cleanup**: the always-visible "Back" pill is gone; a simple back arrow
+               appears with the controls when you tap the screen.
+            5. **VLC-style volume row** in the HUD (speaker + slider): VLC engine volume directly;
+               system volume slider (MPVolumeView) for AVPlayer.
+            6. **Custom JS addons**: Settings → Add Addon now accepts any .js scraper URL
+               (e.g. https://cdn.jsdelivr.net/gh/nahid5665/streambd-libs@main/addons/movielinkbd.js)
+               alongside Stremio manifests — stored, toggleable and deletable.
+          files: Eentertainment-v5.8.0-iOS.ipa
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
