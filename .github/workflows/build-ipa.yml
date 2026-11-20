@@ -42,39 +42,40 @@ jobs:
         run: |
           mkdir -p Payload
           cp -r build/Build/Products/Release-iphoneos/Eentertainment.app Payload/
-          zip -r9 Eentertainment-v5.6-iOS.ipa Payload
+          zip -r9 Eentertainment-v5.7-iOS.ipa Payload
 
       - name: Upload Unsigned IPA Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: Eentertainment-v5.6-iOS-IPA
-          path: Eentertainment-v5.6-iOS.ipa
+          name: Eentertainment-v5.7-iOS-IPA
+          path: Eentertainment-v5.7-iOS.ipa
           if-no-files-found: error
 
       - name: Publish Direct IPA to GitHub Releases
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v5.6.3-eentertainment
-          name: "Eentertainment v5.6.3 — Cineplex HTTP Scheme & Emby PlaybackInfo API Fix"
+          tag_name: v5.7.0-eentertainment
+          name: "Eentertainment v5.7.0 — Dynamic JavaScript VOD Plugin Engine & Cineplex Sanitization"
           body: |
-            ### Eentertainment v5.6.3
+            ### Eentertainment v5.7.0
+            
+            🎬 **Dynamic JavaScript VOD Plugin Engine (`JSVODAddonRunner`) + Headless WebKit CORS Bridge + Cineplex Sanitization**
 
-            🎬 **Cineplex Plain HTTP BDIX Scheme Fix + Emby PlaybackInfo Endpoint Direct Resolution**
-
-            #### What's Fixed in v5.6.3:
-            1. **Cineplex BD Scheme Fix (`http://cineplexbd.net`)**:
-               - Reverted `baseUrl` to plain `http://cineplexbd.net/` to eliminate TLS handshake failures on BDIX ISP networks.
-               - Allowed by iOS via `NSAllowsArbitraryLoads: true` in `Info.plist`.
-               - Realtime scraping for both movies (`player.php`) and TV series (`watch.php`) with MD5 tokens and session cookies.
-            2. **RoarZone Emby Real PlaybackInfo API Resolution**:
-               - Interrogates Emby's `/Items/{itemId}/PlaybackInfo?UserId={userId}&api_key={token}` endpoint after authentication.
-               - Extracts server-authoritative `mediaSourceId`, `Container`, `DirectStreamUrl`, and `TranscodingUrl`.
-               - Direct stream constructed with native container (`stream.mkv` / `stream.mp4`) allowing instant hardware playback in MobileVLCKit / AVPlayer.
-            3. **Verified Working Addons**:
-               - CTG Movies FTP [BDIX]
-               - RoarZone EMBY [BDIX] (PlaybackInfo Direct Stream)
-               - Cineplex BD [BDIX] (Realtime HTTP BDIX)
-               - Custom Stremio HTTP Addons (Settings tab)
-          files: Eentertainment-v5.6-iOS.ipa
+            #### What's New & Fixed in v5.7.0:
+            1. **Native iOS JavaScript VOD Plugin Runner (`JSVODAddonRunner.swift`)**:
+               - Implemented isolated headless `WKWebView` JavaScript execution host matching Android's dynamic `.js` plugin architecture.
+               - Injected `NativeFetchBridge` (`WKScriptMessageHandlerWithReply`) routing `window.fetch()` directly to native `URLSession`, completely bypassing browser CORS restrictions.
+               - In-memory script caching (`[String: String]`) for instantaneous subsequent queries.
+               - Actor-based `ConcurrencyLimiter` capping simultaneous WebKit executions to 3 instances, completely avoiding iOS Jetsam memory pressure.
+               - Bundled `crypto-js.min.js` and common runtime polyfills (`require`, `process`, `Buffer`).
+               - Automatically executes all 24 StreamBD `.js` addons (`cineplexbd.js`, `ctgmovies.js`, `movielinkbd.js`, `netmirror.js`, `11plusweb.js`, `vixsrc.js`, etc.) in real time.
+            2. **Cineplex BD Dual-Layer Fix**:
+               - **Primary:** Dynamically evaluated via `cineplexbd.js` in `JSVODAddonRunner`.
+               - **Secondary Fallback:** Robust Swift `CineplexScraper` with complete SQL-friendly query sanitization (strip colons, dashes, apostrophes, ampersands) and fallback prefix matching.
+            3. **Emby & VLC Dual-Engine Continuity**:
+               - RoarZone EMBY official `PlaybackInfo` direct stream (`stream.mkv` / `stream.mp4`) with real `mediaSourceId`.
+               - Auto-fallback from AVPlayer to MobileVLCKit on error and manual switch button.
+               - Non-blocking close button always visible.
+          files: Eentertainment-v5.7-iOS.ipa
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
