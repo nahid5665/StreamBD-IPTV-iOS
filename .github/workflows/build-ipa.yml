@@ -54,32 +54,33 @@ jobs:
       - name: Publish Direct IPA to GitHub Releases
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v5.6.0-eentertainment
-          name: "Eentertainment v5.6.0 — Dual-Engine Video Player & Addons Engine"
+          tag_name: v5.6.1-eentertainment
+          name: "Eentertainment v5.6.1 — Player Auto-Fallback, Stremio Settings & Emby Direct Stream Fix"
           body: |
-            ### Eentertainment v5.6.0
+            ### Eentertainment v5.6.1
 
-            🎬 **Hardware-Accelerated Dual-Engine Video Player + Interactive Fullscreen HUD + Fixed Addon Streams**
+            🎬 **Dual-Engine Auto-Fallback + Safe PlaybackRequest + Stremio Addons Settings UI + Emby Direct Streams**
 
-            #### What's New in v5.6
-            - **Per-Addon Status UI & Verified Working Streams**:
-              - Live badges showing which addons have the title available, loading, or unavailable
-              - Direct playback only from addons with verified playable streams
-            - **Hardware-Accelerated Dual Engine (AVPlayer + MobileVLCKit)**:
-              - Native Apple AVPlayer engine for all MP4 and HLS M3U8 streams (Cineplex BD, CTG Movies, RoarZone, Toffee, Live TV)
-              - Fallback to MobileVLCKit for raw MPEG-TS, MKV, and custom network protocols
-              - Fixes all video freeze/black-screen issues with instant hardware decoding
-            - **Fixed Fullscreen HUD & Dismissal (Never Stuck)**:
-              - Permanent top-left frosted-glass `(X)` close button (always visible & clickable)
-              - Swipe-down-to-dismiss gesture on the full screen
-              - Direct `onClose` binding guarantee that exits fullscreen immediately
-              - Native UIKit tap recognizer ensures HUD controls toggle smoothly without touch swallowing
-            - **Cineplex BD (BDIX) Full Scraper Integration**:
-              - Instant single-request resolution for 1080P/720P direct MP4 video streams
-            - **CTG Movies FTP (BDIX) Direct Links Engine**:
-              - Direct extraction of high-speed BDIX MP4 streams from Cockpit API
-            - **RoarZone EMBY Server Integration (Movies & Series)**:
-              - Direct master.m3u8 stream resolution with Season & Episode support
+            #### What's Fixed & Added in v5.6.1:
+            1. **Black-Screen Modal Trap Fix (`PlaybackRequest`)**:
+               - Replaced `.fullScreenCover(isPresented:)` with `.fullScreenCover(item: $activePlayback)` using validated non-optional `PlaybackRequest`.
+               - If stream URL is invalid, cover is never opened and an informative alert is shown.
+            2. **Permanent Back/Close Button**:
+               - Top-left Back button is elevated (`.zIndex(200)`) with safe-area top padding and is **always visible** while loading, buffering, or on error.
+            3. **Player Auto-Fallback & Manual Switch**:
+               - Automatically falls back from Apple native AVPlayer to MobileVLCKit if `AVPlayerItem.status == .failed`.
+               - Dedicated **AVPlayer / VLC** manual toggle button in the HUD top bar.
+               - On-screen error banner with retry and engine switch options.
+            4. **MobileVLCKit Header & Network Fix**:
+               - Removed unsupported `:http-custom-headers=`, added `:http-referrer=`, `:http-user-agent=`, and `:http-reconnect=true`.
+            5. **RoarZone Emby Stream Fix**:
+               - Added `MediaSourceId` and `DeviceId=Eentertainment-iOS` to HLS master playlists.
+               - Added direct stream URL option (`/Videos/{id}/stream?static=true`) for direct MobileVLCKit decoding.
+            6. **Stremio Addon Management Settings UI**:
+               - New Settings tab with custom Stremio HTTP Addon URL installer (`.../manifest.json`).
+               - Persistent addon storage via `UserDefaults`.
+               - Quick preset buttons (Torrentio, Cinemeta, CyberFlix).
+               - Addon toggle and delete controls.
           files: Eentertainment-v5.6-iOS.ipa
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
