@@ -14,7 +14,7 @@ final class AddonResolverService {
 
     /// Executes a single addon with strict timeout isolation
     func resolve(addon: Addon, context: MediaLookupContext) async throws -> [StreamSource] {
-        return try await withTimeout(seconds: 12.0) {
+        return try await withTimeout(seconds: 45.0) {
             let lowerName = addon.name.lowercased()
             let lowerId = addon.id.lowercased()
             let url = addon.url.lowercased()
