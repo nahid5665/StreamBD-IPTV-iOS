@@ -126,8 +126,9 @@ final class AddonResolverService {
             }
 
             let epName = matchedEp["Name"] as? String ?? "Episode \(epNum)"
-            let masterUrl = "https://play.roarzone.net/videos/\(epId)/master.m3u8?api_key=\(token)&MediaSourceId=\(epId)&DeviceId=Eentertainment-iOS&VideoCodec=hevc,h264&AudioCodec=aac,mp3"
-            let directUrl = "https://play.roarzone.net/Videos/\(epId)/stream?static=true&api_key=\(token)"
+            let msId = "mediasource_\(epId)"
+            let masterUrl = "https://play.roarzone.net/videos/\(epId)/master.m3u8?api_key=\(token)&MediaSourceId=\(msId)&DeviceId=Eentertainment-iOS&VideoCodec=h264,hevc&AudioCodec=aac,mp3"
+            let directUrl = "https://play.roarzone.net/Videos/\(epId)/stream?MediaSourceId=\(msId)&static=true&api_key=\(token)"
 
             return [
                 StreamSource(
@@ -137,7 +138,8 @@ final class AddonResolverService {
                     type: "direct",
                     headers: [
                         "User-Agent": defaultUA,
-                        "Referer": "https://play.roarzone.net/web/index.html"
+                        "Referer": "https://play.roarzone.net/web/index.html",
+                        "Origin": "https://play.roarzone.net"
                     ]
                 ),
                 StreamSource(
@@ -147,7 +149,8 @@ final class AddonResolverService {
                     type: "direct",
                     headers: [
                         "User-Agent": defaultUA,
-                        "Referer": "https://play.roarzone.net/web/index.html"
+                        "Referer": "https://play.roarzone.net/web/index.html",
+                        "Origin": "https://play.roarzone.net"
                     ]
                 )
             ]
@@ -171,8 +174,9 @@ final class AddonResolverService {
             for item in items.prefix(2) {
                 guard let itemId = item["Id"] as? String ?? (item["Id"] as? Int).map(String.init) else { continue }
                 let name = item["Name"] as? String ?? context.title
-                let masterUrl = "https://play.roarzone.net/videos/\(itemId)/master.m3u8?api_key=\(token)&MediaSourceId=\(itemId)&DeviceId=Eentertainment-iOS&VideoCodec=hevc,h264&AudioCodec=aac,mp3"
-                let directUrl = "https://play.roarzone.net/Videos/\(itemId)/stream?static=true&api_key=\(token)"
+                let msId = "mediasource_\(itemId)"
+                let masterUrl = "https://play.roarzone.net/videos/\(itemId)/master.m3u8?api_key=\(token)&MediaSourceId=\(msId)&DeviceId=Eentertainment-iOS&VideoCodec=h264,hevc&AudioCodec=aac,mp3"
+                let directUrl = "https://play.roarzone.net/Videos/\(itemId)/stream?MediaSourceId=\(msId)&static=true&api_key=\(token)"
 
                 streams.append(StreamSource(
                     url: masterUrl,
@@ -181,7 +185,8 @@ final class AddonResolverService {
                     type: "direct",
                     headers: [
                         "User-Agent": defaultUA,
-                        "Referer": "https://play.roarzone.net/web/index.html"
+                        "Referer": "https://play.roarzone.net/web/index.html",
+                        "Origin": "https://play.roarzone.net"
                     ]
                 ))
                 streams.append(StreamSource(
@@ -191,7 +196,8 @@ final class AddonResolverService {
                     type: "direct",
                     headers: [
                         "User-Agent": defaultUA,
-                        "Referer": "https://play.roarzone.net/web/index.html"
+                        "Referer": "https://play.roarzone.net/web/index.html",
+                        "Origin": "https://play.roarzone.net"
                     ]
                 ))
             }
