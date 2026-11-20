@@ -155,7 +155,7 @@ final class CineplexScraper {
         }
 
         if collected.isEmpty {
-            let jar = HTTPCookieStorage.shared.cookies(for: url) ?? []
+            let jar = HTTPCookieStorage.shared.cookies(for: url)
             for c in jar {
                 collected.append("\(c.name)=\(c.value)")
             }
