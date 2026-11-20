@@ -54,7 +54,58 @@ final class AddonResolverService {
         }
     }
 
-    // MARK: - 1. RoarZone EMBY Resolver (Full Movie + TV Series Episodes)
+    // MARK: - 1. RoarZone EMBY Resolver (PlaybackInfo API + Direct / HLS Streams)
+
+    private func resolveEmbyPlaybackURL(
+        baseUrl: String,
+        itemId: String,
+        userId: String?,
+        token: String
+    ) async -> (directUrl: String, hlsUrl: String?) {
+        var query = "api_key=\(token)"
+        if let userId, !userId.isEmpty {
+            query = "UserId=\(userId)&\(query)"
+        }
+
+        if let infoUrl = URL(string: "\(baseUrl)/Items/\(itemId)/PlaybackInfo?\(query)") {
+            var req = URLRequest(url: infoUrl)
+            req.httpMethod = "POST"
+            req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            req.setValue(token, forHTTPHeaderField: "X-Emby-Token")
+            req.setValue(defaultUA, forHTTPHeaderField: "User-Agent")
+            req.httpBody = "{}".data(using: .utf8)
+            req.timeoutInterval = 5
+
+            if let (data, resp) = try? await URLSession.shared.data(for: req),
+               (resp as? HTTPURLResponse)?.statusCode == 200,
+               let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+               let sources = json["MediaSources"] as? [[String: Any]],
+               let first = sources.first {
+
+                let mediaSourceId = (first["Id"] as? String) ?? itemId
+                let rawContainer = (first["Container"] as? String) ?? "mp4"
+                let container = rawContainer.split(separator: ",").first.map(String.init) ?? "mp4"
+
+                let directUrl: String
+                if let path = first["DirectStreamUrl"] as? String, !path.isEmpty {
+                    let full = path.hasPrefix("http") ? path : "\(baseUrl)\(path)"
+                    directUrl = full.contains("api_key=") ? full : "\(full)\(full.contains("?") ? "&" : "?")api_key=\(token)"
+                } else {
+                    directUrl = "\(baseUrl)/Videos/\(itemId)/stream.\(container)?Static=true&mediaSourceId=\(mediaSourceId)&api_key=\(token)"
+                }
+
+                let hlsUrl: String? = (first["TranscodingUrl"] as? String).map { path in
+                    let full = path.hasPrefix("http") ? path : "\(baseUrl)\(path)"
+                    return full.contains("api_key=") ? full : "\(full)\(full.contains("?") ? "&" : "?")api_key=\(token)"
+                }
+
+                return (directUrl, hlsUrl)
+            }
+        }
+
+        // Fallback without MediaSourceId guess
+        return ("\(baseUrl)/Videos/\(itemId)/stream?Static=true&api_key=\(token)", nil)
+    }
 
     private func resolveRoarZoneEmby(context: MediaLookupContext) async -> [StreamSource] {
         guard let authUrl = URL(string: "https://play.roarzone.net/Users/authenticatebyname") else { return [] }
@@ -73,6 +124,9 @@ final class AddonResolverService {
               let token = authJson["AccessToken"] as? String else {
             return []
         }
+
+        let userObj = authJson["User"] as? [String: Any]
+        let userId = userObj?["Id"] as? String
 
         let cleanTitle = context.title.replacingOccurrences(of: "-", with: " ")
             .replacingOccurrences(of: "_", with: " ")
@@ -126,13 +180,17 @@ final class AddonResolverService {
             }
 
             let epName = matchedEp["Name"] as? String ?? "Episode \(epNum)"
-            let msId = "mediasource_\(epId)"
-            let masterUrl = "https://play.roarzone.net/videos/\(epId)/master.m3u8?api_key=\(token)&MediaSourceId=\(msId)&DeviceId=Eentertainment-iOS&VideoCodec=h264,hevc&AudioCodec=aac,mp3"
-            let directUrl = "https://play.roarzone.net/Videos/\(epId)/stream?MediaSourceId=\(msId)&static=true&api_key=\(token)"
+            let (directUrl, hlsUrl) = await resolveEmbyPlaybackURL(
+                baseUrl: "https://play.roarzone.net",
+                itemId: epId,
+                userId: userId,
+                token: token
+            )
 
-            return [
-                StreamSource(
-                    url: masterUrl,
+            var streams: [StreamSource] = []
+            if let hls = hlsUrl {
+                streams.append(StreamSource(
+                    url: hls,
                     quality: "HD 1080P",
                     provider: "RoarZone [EMBY] (S\(seasonNum)E\(epNum): \(epName))",
                     type: "direct",
@@ -141,19 +199,20 @@ final class AddonResolverService {
                         "Referer": "https://play.roarzone.net/web/index.html",
                         "Origin": "https://play.roarzone.net"
                     ]
-                ),
-                StreamSource(
-                    url: directUrl,
-                    quality: "Direct Stream",
-                    provider: "RoarZone [EMBY Direct] (S\(seasonNum)E\(epNum): \(epName))",
-                    type: "direct",
-                    headers: [
-                        "User-Agent": defaultUA,
-                        "Referer": "https://play.roarzone.net/web/index.html",
-                        "Origin": "https://play.roarzone.net"
-                    ]
-                )
-            ]
+                ))
+            }
+            streams.append(StreamSource(
+                url: directUrl,
+                quality: "Direct Stream",
+                provider: "RoarZone [EMBY Direct] (S\(seasonNum)E\(epNum): \(epName))",
+                type: "direct",
+                headers: [
+                    "User-Agent": defaultUA,
+                    "Referer": "https://play.roarzone.net/web/index.html",
+                    "Origin": "https://play.roarzone.net"
+                ]
+            ))
+            return streams
         } else {
             // Movie Lookup
             let movieSearchUrl = "https://play.roarzone.net/Items?searchTerm=\(encodedTitle)&Recursive=true&IncludeItemTypes=Movie&api_key=\(token)"
@@ -174,21 +233,26 @@ final class AddonResolverService {
             for item in items.prefix(2) {
                 guard let itemId = item["Id"] as? String ?? (item["Id"] as? Int).map(String.init) else { continue }
                 let name = item["Name"] as? String ?? context.title
-                let msId = "mediasource_\(itemId)"
-                let masterUrl = "https://play.roarzone.net/videos/\(itemId)/master.m3u8?api_key=\(token)&MediaSourceId=\(msId)&DeviceId=Eentertainment-iOS&VideoCodec=h264,hevc&AudioCodec=aac,mp3"
-                let directUrl = "https://play.roarzone.net/Videos/\(itemId)/stream?MediaSourceId=\(msId)&static=true&api_key=\(token)"
+                let (directUrl, hlsUrl) = await resolveEmbyPlaybackURL(
+                    baseUrl: "https://play.roarzone.net",
+                    itemId: itemId,
+                    userId: userId,
+                    token: token
+                )
 
-                streams.append(StreamSource(
-                    url: masterUrl,
-                    quality: "HD 1080P",
-                    provider: "RoarZone [EMBY] (\(name))",
-                    type: "direct",
-                    headers: [
-                        "User-Agent": defaultUA,
-                        "Referer": "https://play.roarzone.net/web/index.html",
-                        "Origin": "https://play.roarzone.net"
-                    ]
-                ))
+                if let hls = hlsUrl {
+                    streams.append(StreamSource(
+                        url: hls,
+                        quality: "HD 1080P",
+                        provider: "RoarZone [EMBY] (\(name))",
+                        type: "direct",
+                        headers: [
+                            "User-Agent": defaultUA,
+                            "Referer": "https://play.roarzone.net/web/index.html",
+                            "Origin": "https://play.roarzone.net"
+                        ]
+                    ))
+                }
                 streams.append(StreamSource(
                     url: directUrl,
                     quality: "Direct Stream",
