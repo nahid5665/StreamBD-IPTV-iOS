@@ -37,6 +37,23 @@ final class CineplexScraper {
 
         for candidate in candidates {
             let isCandidateTV = isTV || (candidate.kind.lowercased() == "watch")
+            let viewUrlStr = "\(baseUrl)/view.php?id=\(candidate.id)"
+
+            // Step 1: Visit view.php to establish session and capture initial session cookie
+            var viewCookie = ""
+            if let vUrl = URL(string: viewUrlStr) {
+                var vReq = URLRequest(url: vUrl)
+                vReq.setValue(userAgent, forHTTPHeaderField: "User-Agent")
+                vReq.setValue("\(baseUrl)/", forHTTPHeaderField: "Referer")
+                vReq.timeoutInterval = 5
+                if let (_, vResp) = try? await URLSession.shared.data(for: vReq),
+                   let httpResp = vResp as? HTTPURLResponse,
+                   let cookies = httpResp.allHeaderFields["Set-Cookie"] as? String {
+                    viewCookie = cookies
+                }
+            }
+
+            // Step 2: Request player.php (movie) or watch.php (series) with captured cookie and referer
             let pUrlStr = isCandidateTV
                 ? "\(baseUrl)/watch.php?id=\(candidate.id)&season=\(season)&ep=\(episode)"
                 : "\(baseUrl)/player.php?id=\(candidate.id)"
@@ -44,18 +61,21 @@ final class CineplexScraper {
             guard let pUrl = URL(string: pUrlStr) else { continue }
             var pReq = URLRequest(url: pUrl)
             pReq.setValue(userAgent, forHTTPHeaderField: "User-Agent")
-            pReq.setValue("\(baseUrl)/", forHTTPHeaderField: "Referer")
-            pReq.timeoutInterval = 7
+            pReq.setValue(viewUrlStr, forHTTPHeaderField: "Referer")
+            if !viewCookie.isEmpty {
+                pReq.setValue(viewCookie, forHTTPHeaderField: "Cookie")
+            }
+            pReq.timeoutInterval = 6
 
             guard let (pData, pResp) = try? await URLSession.shared.data(for: pReq),
                   let pHtml = String(data: pData, encoding: .utf8) else { continue }
 
-            var cookieHeader = ""
-            if let httpResp = pResp as? HTTPURLResponse {
-                if let cookies = httpResp.allHeaderFields["Set-Cookie"] as? String {
-                    cookieHeader = cookies
-                }
+            var playerCookie = ""
+            if let httpResp = pResp as? HTTPURLResponse,
+               let cookies = httpResp.allHeaderFields["Set-Cookie"] as? String {
+                playerCookie = cookies
             }
+            let combinedCookie = viewCookie.isEmpty ? playerCookie : (playerCookie.isEmpty ? viewCookie : "\(viewCookie); \(playerCookie)")
 
             // Extract stream URL: check videoSrc (movie) or source src (series)
             var rawStream: String? = nil
@@ -94,8 +114,8 @@ final class CineplexScraper {
                 "Referer": pUrlStr,
                 "Origin": baseUrl
             ]
-            if !cookieHeader.isEmpty {
-                reqHeaders["Cookie"] = cookieHeader
+            if !combinedCookie.isEmpty {
+                reqHeaders["Cookie"] = combinedCookie
             }
 
             let label = isCandidateTV ? "Cineplex BD [BDIX] (\(candidate.title) S\(season)E\(episode))" : "Cineplex BD [BDIX] (\(candidate.title))"
