@@ -1011,6 +1011,29 @@ struct NetflixMediaDetailSheet: View {
                                                 .background(Color.white.opacity(0.08))
                                                 .clipShape(Capsule())
 
+                                            // Hand this stream to the installed VLC app
+                                            if source.type != "embed" {
+                                                Button {
+                                                    let opened = VLCAppIntegration.open(
+                                                        streamURL: source.url,
+                                                        title: source.provider ?? media.displayTitle
+                                                    )
+                                                    if !opened {
+                                                        playbackAlertText = "VLC app not found on this iPhone."
+                                                        showPlaybackAlert = true
+                                                    }
+                                                } label: {
+                                                    Image(systemName: "cone.fill")
+                                                        .font(.system(size: 14, weight: .bold))
+                                                        .foregroundStyle(.orange)
+                                                        .padding(.horizontal, 8)
+                                                        .padding(.vertical, 5)
+                                                        .background(Color.orange.opacity(0.18))
+                                                        .clipShape(Capsule())
+                                                }
+                                                .buttonStyle(ScaleButtonStyle(scale: 0.9))
+                                            }
+
                                             Image(systemName: "play.circle.fill")
                                                 .font(.title3)
                                                 .foregroundStyle(
@@ -1144,6 +1167,16 @@ struct NetflixMediaDetailSheet: View {
             showPlaybackAlert = true
             return
         }
+
+        // Settings -> External Player: hand the stream to the installed VLC app.
+        // Embed pages can't be played by VLC — they always stay in-app.
+        if PlayerDestination.current == .vlcApp,
+           source.type != "embed",
+           VLCAppIntegration.isVLCInstalled {
+            let handedOff = VLCAppIntegration.open(streamURL: source.url, title: source.provider ?? media.displayTitle)
+            if handedOff { return }
+        }
+
         let isEmbed = (source.type == "embed")
         activePlayback = PlaybackRequest(
             url: url,
@@ -1364,6 +1397,7 @@ struct SettingsNetflixView: View {
     @State private var showAddonAlert: Bool = false
     @State private var showAddonDiagnostics: Bool = false
     @AppStorage(PlayerSettings.storageKey) private var playerPreferenceRaw: String = PlayerEnginePreference.auto.rawValue
+    @AppStorage(PlayerDestination.storageKey) private var playerDestinationRaw: String = PlayerDestination.inApp.rawValue
 
     var body: some View {
         NavigationStack {
@@ -1545,6 +1579,44 @@ struct SettingsNetflixView: View {
                              : "Auto: VLC for TS/MKV/RTMP, AVPlayer for the rest.")
                             .font(.caption2)
                             .foregroundStyle(.green)
+                    }
+                    .padding(16)
+                    .liquidGlass(cornerRadius: 16, opacity: 0.5)
+                    .padding(.horizontal, 20)
+
+                    // External Player (VLC App Handoff)
+                    VStack(alignment: .leading, spacing: 12) {
+                        Label("External Player", systemImage: "arrow.up.forward.app.fill")
+                            .font(.headline)
+                            .foregroundStyle(.white)
+
+                        Picker("Playback Destination", selection: $playerDestinationRaw) {
+                            ForEach(PlayerDestination.allCases) { dest in
+                                Text(dest.rawValue).tag(dest.rawValue)
+                            }
+                        }
+                        .pickerStyle(.segmented)
+                        .onChange(of: playerDestinationRaw) { newValue in
+                            if let dest = PlayerDestination(rawValue: newValue) {
+                                PlayerDestination.current = dest
+                            }
+                        }
+
+                        HStack(spacing: 6) {
+                            Image(systemName: VLCAppIntegration.isVLCInstalled ? "checkmark.circle.fill" : "xmark.circle")
+                                .foregroundStyle(VLCAppIntegration.isVLCInstalled ? .green : .gray)
+                            Text(VLCAppIntegration.isVLCInstalled
+                                 ? "VLC app detected on this iPhone."
+                                 : "VLC app not installed — download it from the App Store.")
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                        }
+
+                        Text(PlayerDestination.current == .vlcApp
+                             ? "Streams open in the VLC app. Note: custom headers (Referer/Cookie) are not forwarded, so some protected BDIX streams may refuse in VLC — use the in-app engine for those."
+                             : "Streams play inside this app with the engine chosen above.")
+                            .font(.caption2)
+                            .foregroundStyle(PlayerDestination.current == .vlcApp ? .orange : .secondary)
                     }
                     .padding(16)
                     .liquidGlass(cornerRadius: 16, opacity: 0.5)
