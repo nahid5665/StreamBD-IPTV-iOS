@@ -42,32 +42,37 @@ jobs:
         run: |
           mkdir -p Payload
           cp -r build/Build/Products/Release-iphoneos/Eentertainment.app Payload/
-          zip -r9 Eentertainment-v5.7.6-iOS.ipa Payload
+          zip -r9 Eentertainment-v5.7.7-iOS.ipa Payload
 
       - name: Upload Unsigned IPA Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: Eentertainment-v5.7.6-iOS-IPA
-          path: Eentertainment-v5.7.6-iOS.ipa
+          name: Eentertainment-v5.7.7-iOS-IPA
+          path: Eentertainment-v5.7.7-iOS.ipa
           if-no-files-found: error
 
       - name: Publish Direct IPA to GitHub Releases
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v5.7.6-eentertainment
-          name: "Eentertainment v5.7.6 — Player Engine Chooser (Settings → Video Player)"
+          tag_name: v5.7.7-eentertainment
+          name: "Eentertainment v5.7.7 — APK-parity JS Runner + Non-UTF8 HTML Decode"
           body: |
-            ### Eentertainment v5.7.6
+            ### Eentertainment v5.7.7
 
-            🎛️ **Choose your player engine — new Settings section**
+            🔬 **Diagnostics round 3 — both remaining failures fixed at the root**
 
-            #### What's New in v5.7.6:
-            1. **Settings → Video Player**: pick **Auto / VLC / AVPlayer** as your player engine.
-               - **Auto** (default): VLC for TS/MKV/RTMP streams, AVPlayer first for the rest, automatic VLC fallback on AVPlayer failure.
-               - **VLC**: MobileVLCKit plays everything — maximum format compatibility with addon-supplied headers.
-               - **AVPlayer**: Apple-native engine everywhere (AirPlay, Picture-in-Picture); no automatic fallback, manual engine switch still available in the player HUD.
-            2. Preference is persisted across launches; the in-player HUD engine-switch button still works for one-off changes.
-            3. Note: the VLC *engine* (MobileVLCKit) was already embedded — this adds full user control over when it is used. The standalone VLC app UI cannot be embedded into another app (licensing + architecture).
-          files: Eentertainment-v5.7.6-iOS.ipa
+            #### What's Fixed in v5.7.7:
+            1. **JS runner: 'unsupported type' crash (APK-parity fix)**:
+               - Every evaluated script now terminates with `; 'ok';` exactly like the
+                 Android QuickJS runner does. Without it, evaluateJavaScript tried to
+                 marshal the trailing JS function object (window.fetch / module.exports
+                 assignments) back to Swift and threw 'JavaScript execution returned a
+                 result of an unsupported type' — killing ALL JS addons before any fetch.
+            2. **Non-UTF8 HTML bodies (cineplexbd.net)**:
+               - The site serves 96,519-byte search/player pages that are NOT valid UTF-8.
+                 Added a decode chain: gzip magic strip+inflate → UTF-8 → UTF-16 BOM →
+                 ISO-Latin-1 (byte-total), with a hex head-dump log if truly undecodable.
+            3. Applies to native scraper AND every JS addon via the fetch bridge.
+          files: Eentertainment-v5.7.7-iOS.ipa
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

@@ -86,7 +86,7 @@ final class CineplexScraper {
                 addonLog("[CineplexScraper] \(isCandidateTV ? "watch.php" : "player.php")?id=\(candidate.id) ERROR \(error.localizedDescription)")
                 continue
             }
-            guard let pHtml = String(data: pData, encoding: .utf8) else {
+            guard let pHtml = Self.decodeHTMLBody(pData) else {
                 addonLog("[CineplexScraper] player response undecodable for id \(candidate.id)")
                 continue
             }
@@ -172,6 +172,36 @@ final class CineplexScraper {
         }
     }
 
+    /// Robust HTML body decoder. The site serves bodies that are NOT valid
+    /// UTF-8 (96,519-byte search responses decode to nil with plain utf8),
+    /// so fall back through UTF-16 BOM detection and ISO-Latin-1 (which
+    /// always succeeds). Strips a raw gzip wrapper defensively if present.
+    static func decodeHTMLBody(_ data: Data) -> String? {
+        var payload = data
+        // gzip magic (1f 8b): URLSession normally decompresses, but handle a
+        // raw gzipped body defensively (strip 10-byte header + 8-byte trailer,
+        // then zlib-inflate the raw deflate stream).
+        if payload.count > 18, payload[payload.startIndex] == 0x1f, payload[payload.index(after: payload.startIndex)] == 0x8b {
+            let deflated = payload.dropFirst(10).dropLast(8)
+            if let inflated = try? (deflated as NSData).decompressed(using: .zlib) {
+                payload = inflated as Data
+            }
+        }
+
+        if let s = String(data: payload, encoding: .utf8) { return s }
+
+        if payload.count >= 2 {
+            let b0 = payload[payload.startIndex]
+            let b1 = payload[payload.index(after: payload.startIndex)]
+            if (b0 == 0xFF && b1 == 0xFE) || (b0 == 0xFE && b1 == 0xFF) {
+                return String(data: payload, encoding: .utf16)
+            }
+        }
+
+        // ISO-Latin-1 maps every byte, so this only fails for the truly binary case.
+        return String(data: payload, encoding: .isoLatin1)
+    }
+
     /// Robust Set-Cookie extraction: case-insensitive header scan, HTTPCookie
     /// parsing, then shared-jar fallback. URLSession may fold Set-Cookie headers
     /// into HTTPCookieStorage and omit them from allHeaderFields entirely.
@@ -241,8 +271,9 @@ final class CineplexScraper {
             do {
                 let (data, resp) = try await URLSession.shared.data(for: req)
                 let code = (resp as? HTTPURLResponse)?.statusCode ?? -1
-                guard let html = String(data: data, encoding: .utf8), !html.isEmpty else {
-                    addonLog("[CineplexScraper] search via \(strategy.label): HTTP \(code), empty/undecodable body (\(data.count) bytes)")
+                guard let html = Self.decodeHTMLBody(data), !html.isEmpty else {
+                    let head = data.prefix(16).map { String(format: "%02x", $0) }.joined(separator: " ")
+                    addonLog("[CineplexScraper] search via \(strategy.label): HTTP \(code), \(data.count) bytes UNDECODABLE (head: \(head))")
                     continue
                 }
 

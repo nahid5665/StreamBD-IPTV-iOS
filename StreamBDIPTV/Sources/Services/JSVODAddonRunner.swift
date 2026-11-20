@@ -220,10 +220,15 @@ private final class HeadlessJSInstance: NSObject, WKNavigationDelegate {
 
         do {
             if !bootstrapScript.isEmpty {
-                _ = try await wv.evaluateJavaScript(bootstrapScript)
+                // Mirror the Android QuickJS runner (smali: "; 'ok';"): terminate
+                // every evaluated script with a plain string result so
+                // evaluateJavaScript never attempts to marshal a trailing JS
+                // function object (e.g. the window.fetch assignment) back to
+                // Swift — which throws "unsupported type".
+                _ = try await wv.evaluateJavaScript(bootstrapScript + "\n; 'ok';")
             }
 
-            let moduleWrapper = "var module = { exports: {} }; var exports = module.exports;\n" + pluginScript
+            let moduleWrapper = "var module = { exports: {} }; var exports = module.exports;\n" + pluginScript + "\n; 'ok';"
             _ = try await wv.evaluateJavaScript(moduleWrapper)
         } catch {
             addonLog("[JSVODAddonRunner] bootstrap/plugin evaluate FAILED: \(error.localizedDescription)")
