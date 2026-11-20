@@ -1364,6 +1364,7 @@ struct SettingsNetflixView: View {
     @State private var addonAlert: String? = nil
     @State private var showAddonAlert: Bool = false
     @State private var showAddonDiagnostics: Bool = false
+    @AppStorage(PlayerSettings.storageKey) private var playerPreferenceRaw: String = PlayerEnginePreference.auto.rawValue
 
     var body: some View {
         NavigationStack {
@@ -1514,6 +1515,40 @@ struct SettingsNetflixView: View {
                             }
                         }
                     }
+                    .padding(.horizontal, 20)
+
+                    // Video Player Engine Selection
+                    VStack(alignment: .leading, spacing: 12) {
+                        Label("Video Player", systemImage: "play.rectangle.fill")
+                            .font(.headline)
+                            .foregroundStyle(.white)
+
+                        Text("Choose which engine plays your streams. VLC handles more formats (TS, MKV, RTMP) with custom headers; AVPlayer is Apple-native with AirPlay and Picture-in-Picture. Auto picks the best engine per stream and falls back automatically.")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+
+                        Picker("Player Engine", selection: $playerPreferenceRaw) {
+                            ForEach(PlayerEnginePreference.allCases) { pref in
+                                Text(pref.rawValue).tag(pref.rawValue)
+                            }
+                        }
+                        .pickerStyle(.segmented)
+                        .onChange(of: playerPreferenceRaw) { newValue in
+                            if let pref = PlayerEnginePreference(rawValue: newValue) {
+                                PlayerSettings.preference = pref
+                            }
+                        }
+
+                        Text(PlayerSettings.preference == .vlc
+                             ? "VLC engine active for all streams (MobileVLCKit)."
+                             : PlayerSettings.preference == .avPlayer
+                             ? "AVPlayer engine active for all streams (no automatic VLC fallback)."
+                             : "Auto: VLC for TS/MKV/RTMP, AVPlayer for the rest.")
+                            .font(.caption2)
+                            .foregroundStyle(.green)
+                    }
+                    .padding(16)
+                    .liquidGlass(cornerRadius: 16, opacity: 0.5)
                     .padding(.horizontal, 20)
 
                     // Addon Diagnostics

@@ -427,7 +427,15 @@ struct UniversalFullScreenPlayerView: View {
                 }
         )
         .onAppear {
-            currentEngine = shouldUseVLC ? .vlc : .avPlayer
+            // Honor the app-wide player preference (Settings -> Video Player).
+            switch PlayerSettings.preference {
+            case .auto:
+                currentEngine = shouldUseVLC ? .vlc : .avPlayer
+            case .vlc:
+                currentEngine = .vlc
+            case .avPlayer:
+                currentEngine = .avPlayer
+            }
             setupPlayer()
             resetHideTimer()
         }
@@ -639,6 +647,14 @@ struct UniversalFullScreenPlayerView: View {
     }
 
     private func fallbackToVLC(reason: String) {
+        // Respect a pinned AVPlayer preference: no automatic engine switch;
+        // the user can still switch manually from the HUD button.
+        if PlayerSettings.preference == .avPlayer {
+            isBuffering = false
+            errorMessage = reason
+            statusToast = "AVPlayer failed: \(reason)"
+            return
+        }
         playerItemStatusObserver?.invalidate()
         playerItemStatusObserver = nil
         if let p = avPlayer {
