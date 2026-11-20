@@ -158,6 +158,20 @@ final class CineplexScraper {
         return streamSources
     }
 
+    /// Applies the UA strategy that won during search (session default / iOS
+    /// Safari / desktop Chrome) so view.php and player.php are fetched the
+    /// same way the site accepted.
+    private func applyActiveUA(to request: URLRequest) {
+        if let strategy = activeUAStrategy {
+            if let ua = strategy.ua {
+                request.setValue(ua, forHTTPHeaderField: "User-Agent")
+            }
+            // nil strategy UA = session default: intentionally no explicit header
+        } else {
+            request.setValue(userAgent, forHTTPHeaderField: "User-Agent")
+        }
+    }
+
     /// Robust Set-Cookie extraction: case-insensitive header scan, HTTPCookie
     /// parsing, then shared-jar fallback. URLSession may fold Set-Cookie headers
     /// into HTTPCookieStorage and omit them from allHeaderFields entirely.
