@@ -228,7 +228,19 @@ private final class HeadlessJSInstance: NSObject, WKNavigationDelegate {
                 _ = try await wv.evaluateJavaScript(bootstrapScript + "\n; 'ok';")
             }
 
-            let moduleWrapper = "var module = { exports: {} }; var exports = module.exports;\n" + pluginScript + "\n; 'ok';"
+            // APK-parity: wrap the addon in an IIFE so top-level `return fn;`
+            // style addons (hdhub4u, NHD, ppcine, rtally, cinetv, ftpbd*, OMH,
+            // timepassbdweb, ibccl-ftp) work: the wrapper's return value is
+            // captured into module.exports. CommonJS-style addons still work
+            // because the IIFE assigns to the outer-scope `module` object.
+            let moduleWrapper = """
+                var module = { exports: {} }; var exports = module.exports;
+                var __sbdAddonResult = (function() {
+                \(pluginScript)
+                })();
+                if (typeof __sbdAddonResult === 'function') { module.exports = __sbdAddonResult; }
+                ; 'ok';
+                """
             _ = try await wv.evaluateJavaScript(moduleWrapper)
         } catch {
             addonLog("[JSVODAddonRunner] bootstrap/plugin evaluate FAILED: \(error.localizedDescription)")
@@ -265,7 +277,7 @@ private final class HeadlessJSInstance: NSObject, WKNavigationDelegate {
 final class JSVODAddonRunner {
     static let shared = JSVODAddonRunner()
 
-    private let limiter = ConcurrencyLimiter(maxConcurrent: 3)
+    private let limiter = ConcurrencyLimiter(maxConcurrent: 8)
     private var scriptCache: [String: String] = [:]
     private let cacheLock = NSLock()
     private var cryptoJsCache: String? = nil
@@ -502,6 +514,44 @@ final class JSVODAddonRunner {
                 };
             }
         };
+
+        // XMLHttpRequest shim routed through the native bridge (netmirror,
+        // ibccl-ftp use XHR; the raw browser XHR would be CORS-blocked from
+        // the about-page origin).
+        function NativeXMLHttpRequest() {
+            this.readyState = 0; this.status = 0; this.responseText = '';
+            this.response = ''; this._headers = {}; this._method = 'GET'; this._url = '';
+            this.onload = null; this.onerror = null; this.onreadystatechange = null;
+        }
+        NativeXMLHttpRequest.prototype.open = function(method, url) {
+            this._method = method; this._url = url; this.readyState = 1;
+            if (this.onreadystatechange) { this.onreadystatechange(); }
+        };
+        NativeXMLHttpRequest.prototype.setRequestHeader = function(k, v) { this._headers[k] = v; };
+        NativeXMLHttpRequest.prototype.overrideMimeType = function() {};
+        NativeXMLHttpRequest.prototype.abort = function() {};
+        NativeXMLHttpRequest.prototype.send = function(body) {
+            var self = this;
+            window.fetch(self._url, { method: self._method, headers: self._headers, body: body || undefined })
+                .then(function(res) {
+                    return res.text().then(function(txt) { return { res: res, txt: txt }; });
+                })
+                .then(function(r) {
+                    self.status = r.res.status;
+                    self.responseText = r.txt;
+                    self.response = r.txt;
+                    self.readyState = 4;
+                    if (self.onreadystatechange) { self.onreadystatechange(); }
+                    if (self.onload) { self.onload(); }
+                })
+                .catch(function(e) {
+                    self.status = 0;
+                    self.readyState = 4;
+                    if (self.onreadystatechange) { self.onreadystatechange(); }
+                    if (self.onerror) { self.onerror(e); }
+                });
+        };
+        window.XMLHttpRequest = NativeXMLHttpRequest;
         """
 
         let invoke = """

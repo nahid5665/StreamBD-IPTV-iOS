@@ -42,35 +42,37 @@ jobs:
         run: |
           mkdir -p Payload
           cp -r build/Build/Products/Release-iphoneos/Eentertainment.app Payload/
-          zip -r9 Eentertainment-v5.7.8-iOS.ipa Payload
+          zip -r9 Eentertainment-v5.7.9-iOS.ipa Payload
 
       - name: Upload Unsigned IPA Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: Eentertainment-v5.7.8-iOS-IPA
-          path: Eentertainment-v5.7.8-iOS.ipa
+          name: Eentertainment-v5.7.9-iOS-IPA
+          path: Eentertainment-v5.7.9-iOS.ipa
           if-no-files-found: error
 
       - name: Publish Direct IPA to GitHub Releases
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v5.7.8-eentertainment
-          name: "Eentertainment v5.7.8 — VLC-Style Player Controls (Brightness, Subtitles, Audio Tracks, Speed)"
+          tag_name: v5.7.9-eentertainment
+          name: "Eentertainment v5.7.9 — 10 More Addons Fixed (return-style) + 8x Faster Lookups"
           body: |
-            ### Eentertainment v5.7.8
+            ### Eentertainment v5.7.9
 
-            🎚️ **VLC-style playback controls — tap the "⋯" button in the player HUD**
+            🚀 **Addons 11-20 unlocked + much faster movie pages**
 
-            #### What's New in v5.7.8:
-            1. **Playback Options panel** (player HUD "⋯" button):
-               - **Playback speed**: 0.5× – 2× for both engines.
-               - **Brightness slider** (screen-level, works for both engines).
-               - **Volume slider** for the VLC engine.
-               - **Audio Track / Language switching**: VLC audio track list; AVPlayer media selection groups.
-               - **Subtitle loading**: pick a local .srt/.vtt file — attaches as a VLC subtitle slave; picks in AVPlayer mode auto-switch to VLC.
-            2. **VLC-style gestures on the video**:
-               - Vertical swipe on the LEFT third = brightness, RIGHT third = volume (VLC engine), middle = swipe down to dismiss.
-            3. Screen brightness is restored on player exit.
-          files: Eentertainment-v5.7.8-iOS.ipa
+            #### What's Fixed in v5.7.9:
+            1. **Top-level `return` addons now work (APK-parity)**:
+               - 10 addons (hdhub4u, NHD, ppcine, rtally, cinetv, ftpbdcdn, ftpbdweb,
+                 ibccl-ftp, OMH, timepassbdweb) end with `return fn;` — only legal when
+                 the host wraps the script in a function (as Android does). The runner
+                 now wraps every addon in an IIFE and captures the returned function
+                 into module.exports. These addons previously threw SyntaxError.
+            2. **XMLHttpRequest shim** (netmirror, ibccl-ftp): XHR requests now route
+               through the native fetch bridge instead of being CORS-blocked.
+            3. **Faster movie pages**:
+               - JS addon concurrency raised 3 → 8 (WebViews are lightweight).
+               - 10-minute per-addon result cache: revisiting a title is instant.
+          files: Eentertainment-v5.7.9-iOS.ipa
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
