@@ -42,33 +42,36 @@ jobs:
         run: |
           mkdir -p Payload
           cp -r build/Build/Products/Release-iphoneos/Eentertainment.app Payload/
-          zip -r9 Eentertainment-v5.7.3-iOS.ipa Payload
+          zip -r9 Eentertainment-v5.7.4-iOS.ipa Payload
 
       - name: Upload Unsigned IPA Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: Eentertainment-v5.7.3-iOS-IPA
-          path: Eentertainment-v5.7.3-iOS.ipa
+          name: Eentertainment-v5.7.4-iOS-IPA
+          path: Eentertainment-v5.7.4-iOS.ipa
           if-no-files-found: error
 
       - name: Publish Direct IPA to GitHub Releases
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v5.7.3-eentertainment
-          name: "Eentertainment v5.7.3 — In-App Addon Diagnostics (Cineplex Test)"
+          tag_name: v5.7.4-eentertainment
+          name: "Eentertainment v5.7.4 — ATS Fix: Plain-HTTP Scraping Unblocked (Cineplex)"
           body: |
-            ### Eentertainment v5.7.3
+            ### Eentertainment v5.7.4
 
-            🩺 **On-device Addon Diagnostics — debug without a Mac**
+            🚀 **ROOT CAUSE FIX — App Transport Security was blocking every plain-HTTP scraper**
 
-            #### What's New in v5.7.3:
-            1. **Addon Diagnostics screen** (Settings → Addon Diagnostics):
-               - Live in-app log buffer for the whole addon pipeline (fetch bridge, prewarm, scrapers, resolver).
-               - "Run Cineplex Test" button: probes `http://cineplexbd.net` reachability, runs the native
-                 2-step scraper AND the JS fallback for 'Inception', and reports every step + resulting streams.
-               - Copy-to-clipboard + clear buttons for sharing results.
-            2. **Resolver/scraper result logging**: every addon's stream count (or failure reason) is logged
-               during normal movie lookups, visible in the diagnostics screen.
-          files: Eentertainment-v5.7.3-iOS.ipa
+            #### What's Fixed in v5.7.4:
+            1. **ATS key conflict (the real cineplex blocker)**:
+               - `NSAllowsArbitraryLoadsInWebContent` was present in Info.plist alongside
+                 `NSAllowsArbitraryLoads`. Per Apple's ATS rules, when the web-content key is
+                 present the system IGNORES `NSAllowsArbitraryLoads` — so every URLSession
+                 request to `http://cineplexbd.net` (native scraper + JS fetch bridge) failed
+                 with "App Transport Security policy requires the use of a secure connection".
+               - Removed `NSAllowsArbitraryLoadsInWebContent`; `NSAllowsArbitraryLoads` now
+                 actually applies, allowing plain-HTTP scraping exactly like Android's
+                 `usesCleartextTraffic="true"`.
+            2. Diagnostics screen (from v5.7.3) kept for on-device verification.
+          files: Eentertainment-v5.7.4-iOS.ipa
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
