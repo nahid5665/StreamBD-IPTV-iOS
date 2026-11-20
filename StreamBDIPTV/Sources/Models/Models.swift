@@ -203,6 +203,7 @@ struct StreamSource: Identifiable, Codable, Hashable {
     var provider: String? = "Default"
     var type: String? = nil
     var headers: [String: String]? = nil
+    var preferVLC: Bool? = false
 }
 
 struct UserPlaylist: Identifiable, Codable, Hashable {
