@@ -175,6 +175,25 @@ struct Addon: Identifiable, Codable, Hashable {
     var name: String
     var url: String
     var enabled: Bool = true
+    var type: String? = "default"
+}
+
+enum AddonLookupState: Equatable, Hashable {
+    case idle
+    case loading
+    case available([StreamSource])
+    case unavailable
+    case failed(String)
+}
+
+struct MediaLookupContext: Hashable {
+    let tmdbId: Int
+    let imdbId: String?
+    let title: String
+    let year: String?
+    let isTV: Bool
+    let season: Int?
+    let episode: Int?
 }
 
 struct StreamSource: Identifiable, Codable, Hashable {
