@@ -236,7 +236,7 @@ struct DxBillboard: View {
                 if !media.displayDate.isEmpty { DxBadge(text: media.displayDate) }
                 DxTitleLogo(name: media.displayTitle, maxHeight: 110, textSize: 40)
                     .frame(maxWidth: 320)
-                Text([dxTypeName(media.isMovie ? "movie" : "series")] + media.genrePreview)
+                Text(([dxTypeName(media.isMovie ? "movie" : "series")] + media.genrePreview).joined(separator: " · "))
                     .font(.subheadline)
                     .foregroundStyle(Dx.muted)
                 if let d = media.overview {
