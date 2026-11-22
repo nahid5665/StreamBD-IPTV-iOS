@@ -25,6 +25,12 @@ struct DxRootView: View {
     var body: some View {
         ZStack {
             tabs
+            // the intro: DX.BI on black, then the tabs come in (topmost layer, so it always shows)
+            if introVisible {
+                DxIntroView()
+                    .zIndex(999)
+                    .transition(.opacity)
+            }
         }
         .background(Dx.background.ignoresSafeArea())
         .overlay(alignment: .top) {
@@ -47,16 +53,10 @@ struct DxRootView: View {
                 .environmentObject(mainVM)
                 .environmentObject(vodVM)
         }
-        // the intro: DX.BI on black, then the tabs come in
-        .overlay {
-            if introVisible {
-                DxIntroView()
-                    .transition(.opacity)
-                    .task {
-                        try? await Task.sleep(for: .seconds(1.6))
-                        withAnimation(.easeOut(duration: 0.45)) { introVisible = false }
-                    }
-            }
+        .task {
+            // hold the intro long enough to read, then fade into the tabs
+            try? await Task.sleep(for: .seconds(2.0))
+            withAnimation(.easeOut(duration: 0.5)) { introVisible = false }
         }
         .task {
             await mainVM.loadInitialPlaylists()
@@ -170,7 +170,7 @@ struct DxIntroView: View {
                 .scaleEffect(shown ? 1 : 0.8)
                 .opacity(shown ? 1 : 0)
         }
-        .task {
+        .onAppear {
             withAnimation(.spring(response: 0.5, dampingFraction: 0.75)) { shown = true }
         }
     }

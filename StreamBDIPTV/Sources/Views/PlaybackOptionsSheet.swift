@@ -20,17 +20,21 @@ struct PlaybackOptionsSheet: View {
     @State private var vlcSelectedAudioIndex: Int = 0
     @State private var avAudioOptions: [String] = []
     @State private var avSelectedAudioIndex: Int = 0
+    @State private var vlcSubtitleOptions: [String] = []
+    @State private var vlcSelectedSubtitleIndex: Int = 0
+    @State private var avSubtitleOptions: [String] = []
+    @State private var avSelectedSubtitleIndex: Int = -1 // -1 = Off
 
     private let speedOptions: [Float] = [0.5, 0.75, 1.0, 1.25, 1.5, 2.0]
 
     var body: some View {
         NavigationStack {
             List {
+                audioSection
+                subtitleSection
                 speedSection
                 volumeSection
                 brightnessSection
-                audioSection
-                subtitleSection
             }
             .navigationTitle("Playback Options")
             .navigationBarTitleDisplayMode(.inline)
@@ -148,17 +152,50 @@ struct PlaybackOptionsSheet: View {
         }
     }
 
+    @ViewBuilder
     private var subtitleSection: some View {
-        Section("Subtitles") {
+        Section("Subtitle Track") {
+            if engine == .vlc {
+                if vlcSubtitleOptions.count > 1 {
+                    Picker("Subtitle", selection: $vlcSelectedSubtitleIndex) {
+                        ForEach(Array(vlcSubtitleOptions.enumerated()), id: \.offset) { idx, name in
+                            Text(name).tag(idx)
+                        }
+                    }
+                    .onChange(of: vlcSelectedSubtitleIndex) { newIndex in
+                        vlcPlayer?.currentVideoSubTitleIndex = Int32(newIndex)
+                    }
+                    Button("Subtitles Off") {
+                        vlcSelectedSubtitleIndex = -1
+                        vlcPlayer?.currentVideoSubTitleIndex = -1
+                    }
+                    .foregroundStyle(.red)
+                } else {
+                    Text("No embedded subtitle tracks in this stream yet.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            } else if let item = avPlayer?.currentItem {
+                if avSubtitleOptions.count > 1 {
+                    Picker("Subtitle", selection: $avSelectedSubtitleIndex) {
+                        Text("Off").tag(-1)
+                        ForEach(Array(avSubtitleOptions.enumerated()), id: \.offset) { idx, name in
+                            Text(name).tag(idx)
+                        }
+                    }
+                    .onChange(of: avSelectedSubtitleIndex) { newIndex in
+                        selectAVSubtitleTrack(at: newIndex)
+                    }
+                } else {
+                    Text("No embedded subtitle tracks in this stream yet.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
             Button {
                 showSubtitleImporter = true
             } label: {
                 Label("Load Subtitle File (.srt / .vtt)", systemImage: "doc.text.badge.plus")
-            }
-            if engine == .avPlayer {
-                Text("Subtitles use the VLC engine — picking one switches automatically.")
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
             }
         }
     }
@@ -193,6 +230,13 @@ struct PlaybackOptionsSheet: View {
             if idx >= 0 && idx < names.count {
                 vlcSelectedAudioIndex = idx
             }
+            // Embedded subtitle tracks (same legacy shape as the audio API)
+            let subNames = (p.videoSubTitlesNames ?? []).map { "\($0)" }
+            vlcSubtitleOptions = subNames
+            let subIdx = Int(p.currentVideoSubTitleIndex)
+            if subIdx >= 0 && subIdx < subNames.count {
+                vlcSelectedSubtitleIndex = subIdx
+            }
         } else if let item = avPlayer?.currentItem {
             if let group = try? item.asset.mediaSelectionGroup(forMediaCharacteristic: .audible) {
                 let options = group.options
@@ -202,6 +246,12 @@ struct PlaybackOptionsSheet: View {
                     avSelectedAudioIndex = idx
                 }
             }
+            if let group = try? item.asset.mediaSelectionGroup(forMediaCharacteristic: .legible) {
+                let options = group.options
+                avSubtitleOptions = options.map { $0.displayName }
+                let current = item.selectedMediaOption(in: group)
+                avSelectedSubtitleIndex = current.flatMap { options.firstIndex(of: $0) } ?? -1
+            }
         }
     }
 
@@ -210,5 +260,15 @@ struct PlaybackOptionsSheet: View {
               let group = try? item.asset.mediaSelectionGroup(forMediaCharacteristic: .audible),
               index < group.options.count else { return }
         item.select(group.options[index], in: group)
+    }
+
+    private func selectAVSubtitleTrack(at index: Int) {
+        guard let item = avPlayer?.currentItem,
+              let group = try? item.asset.mediaSelectionGroup(forMediaCharacteristic: .legible) else { return }
+        if index < 0 {
+            item.select(nil, in: group) // Off
+        } else if index < group.options.count {
+            item.select(group.options[index], in: group)
+        }
     }
 }

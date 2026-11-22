@@ -265,6 +265,7 @@ struct UniversalFullScreenPlayerView: View {
     @State private var statusToast: String? = nil
     @State private var isMuted: Bool = false
     @State private var vlcVolumeBeforeMute: Int = 100
+    @State private var avVolumePercent: Int = 100
 
     // VLC-style playback options (brightness / volume / speed / tracks / subtitles)
     @State private var showPlaybackOptions: Bool = false
@@ -457,7 +458,7 @@ struct UniversalFullScreenPlayerView: View {
         }
         .simultaneousGesture(
             // VLC-style vertical gestures: left third = brightness,
-            // right third = volume (VLC engine only).
+            // right third = volume (both engines).
             DragGesture(minimumDistance: 8)
                 .onChanged { value in
                     guard !isScrubbing else { return }
@@ -475,11 +476,37 @@ struct UniversalFullScreenPlayerView: View {
                         let newV = min(100, max(0, vlcVolumePercent + delta))
                         p.audio?.volume = Int32(Float(newV) / 100.0 * 256.0)
                         vlcVolumePercent = newV
+                        isMuted = newV == 0
+                        gestureHUDText = "🔊 \(newV)%"
+                    } else if startX > w * 2 / 3, currentEngine == .avPlayer, let p = avPlayer {
+                        let delta = Int(dy / 4.0)
+                        let newV = min(100, max(0, avVolumePercent + delta))
+                        p.volume = Float(newV) / 100.0
+                        avVolumePercent = newV
+                        isMuted = newV == 0
                         gestureHUDText = "🔊 \(newV)%"
                     }
                 }
                 .onEnded { _ in
                     gestureStartBrightness = UIScreen.main.brightness
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) {
+                        gestureHUDText = nil
+                    }
+                }
+        )
+        .simultaneousGesture(
+            // Double-tap: right half jumps forward 10s, left half back 10s.
+            SpatialTapGesture(count: 2)
+                .onEnded { v in
+                    let half = UIScreen.main.bounds.width / 2
+                    if v.location.x > half {
+                        seekBy(seconds: 10)
+                        gestureHUDText = "⏩ 10s"
+                    } else {
+                        seekBy(seconds: -10)
+                        gestureHUDText = "⏪ 10s"
+                    }
+                    resetHideTimer()
                     DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) {
                         gestureHUDText = nil
                     }
@@ -571,6 +598,16 @@ struct UniversalFullScreenPlayerView: View {
                         .foregroundStyle(.white.opacity(0.9))
                 }
                 .accessibilityLabel("Aspect ratio")
+
+                // Audio / subtitle track pickers (dx.bi's captions icon)
+                Button {
+                    showPlaybackOptions = true
+                } label: {
+                    Image(systemName: "captions.bubble")
+                        .font(.system(size: 16, weight: .semibold))
+                        .foregroundStyle(.white.opacity(0.9))
+                }
+                .accessibilityLabel("Audio and subtitles")
 
                 Button {
                     showPlaybackOptions = true
@@ -983,6 +1020,7 @@ struct StreamPlayerSheet: View {
     @State private var playerStateText: String = "Connecting…"
     @State private var isPlaying: Bool = false
     @State private var isFullScreen: Bool = false
+    @State private var wasPlayingBeforeFullscreen: Bool = true
     @State private var statusMessage: String? = nil
 
     private var sourceKeys: [String] {
@@ -1174,6 +1212,17 @@ struct StreamPlayerSheet: View {
                             isFullScreen = false
                         }
                     )
+                }
+            }
+            .onChange(of: isFullScreen) { fs in
+                // Entering fullscreen starts a second player on the same stream —
+                // pause the embedded one so both voices never overlap.
+                guard let p = vlcPlayer else { return }
+                if fs {
+                    wasPlayingBeforeFullscreen = p.isPlaying
+                    p.pause()
+                } else if wasPlayingBeforeFullscreen {
+                    p.play()
                 }
             }
         }
