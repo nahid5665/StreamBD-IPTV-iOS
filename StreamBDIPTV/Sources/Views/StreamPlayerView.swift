@@ -255,6 +255,7 @@ struct UniversalFullScreenPlayerView: View {
     @State private var showControls: Bool = true
     @State private var currentTimeText: String = "00:00"
     @State private var totalTimeText: String = "00:00"
+    @State private var remainingText: String = "-00:00"
     @State private var progressValue: Double = 0.0
     @State private var isScrubbing: Bool = false
     @State private var aspectRatioIndex: Int = 0
@@ -262,6 +263,8 @@ struct UniversalFullScreenPlayerView: View {
     @State private var isBuffering: Bool = true
     @State private var errorMessage: String? = nil
     @State private var statusToast: String? = nil
+    @State private var isMuted: Bool = false
+    @State private var vlcVolumeBeforeMute: Int = 100
 
     // VLC-style playback options (brightness / volume / speed / tracks / subtitles)
     @State private var showPlaybackOptions: Bool = false
@@ -322,6 +325,8 @@ struct UniversalFullScreenPlayerView: View {
                         isBuffering = false
                         currentTimeText = curr.stringValue
                         totalTimeText = total.stringValue
+                        remainingText = "-" + formatRemaining(totalSeconds: Self.clockSeconds(total.stringValue),
+                                                              currentSeconds: Self.clockSeconds(curr.stringValue))
                         if let p = vlcPlayer {
                             progressValue = Double(p.position)
                         }
@@ -529,195 +534,204 @@ struct UniversalFullScreenPlayerView: View {
     }
 
     private var hudControlsOverlay: some View {
-        VStack {
-            // Top Bar
-            HStack(spacing: 12) {
-                // Simple back arrow (HUD-only, appears when tapping the screen)
+        VStack(spacing: 0) {
+            // Top Bar — plain back chevron, fullscreen-style aspect + options (dx.bi chrome)
+            HStack(spacing: 20) {
                 Button {
                     stopAndDismiss()
                 } label: {
                     Image(systemName: "chevron.left")
-                        .font(.system(size: 17, weight: .bold))
+                        .font(.system(size: 19, weight: .semibold))
                         .foregroundStyle(.white)
-                        .padding(.horizontal, 10)
-                        .padding(.vertical, 7)
-                        .background(.ultraThinMaterial)
-                        .clipShape(Capsule())
                 }
-
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(title)
-                        .font(.headline.bold())
-                        .foregroundStyle(.white)
-                        .lineLimit(1)
-                    if let subtitle, !subtitle.isEmpty {
-                        Text(subtitle)
-                            .font(.caption)
-                            .foregroundStyle(.white.opacity(0.75))
-                            .lineLimit(1)
-                    }
-                }
+                .accessibilityLabel("Back")
 
                 Spacer()
 
-                // Engine Switch Button (AVPlayer / VLC)
                 Button {
                     switchEngine(to: currentEngine == .avPlayer ? .vlc : .avPlayer)
+                    statusToast = "Engine: \(currentEngine.rawValue)"
                 } label: {
-                    HStack(spacing: 4) {
-                        Image(systemName: currentEngine == .avPlayer ? "applelogo" : "cone.fill")
-                            .font(.system(size: 11, weight: .bold))
-                        Text(currentEngine.rawValue)
-                            .font(.caption2.bold())
-                    }
-                    .foregroundStyle(.white)
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 6)
-                    .background(.ultraThinMaterial)
-                    .background(currentEngine == .avPlayer ? Color.blue.opacity(0.4) : Color.orange.opacity(0.4))
-                    .clipShape(Capsule())
+                    Image(systemName: currentEngine == .avPlayer ? "applelogo" : "cone.fill")
+                        .font(.system(size: 15, weight: .semibold))
+                        .foregroundStyle(.white.opacity(0.9))
                 }
+                .accessibilityLabel("Switch player engine")
 
-                // Playback Options (speed / audio track / subtitles / brightness)
-                Button {
-                    showPlaybackOptions = true
-                } label: {
-                    Image(systemName: "ellipsis")
-                        .font(.system(size: 13, weight: .bold))
-                        .foregroundStyle(.white)
-                        .padding(.horizontal, 10)
-                        .padding(.vertical, 7)
-                        .background(.ultraThinMaterial)
-                        .clipShape(Capsule())
-                }
-
-                // Aspect Ratio Selector
                 Button {
                     aspectRatioIndex = (aspectRatioIndex + 1) % aspectRatios.count
                     if let p = vlcPlayer {
                         p.videoAspectRatio = aspectRatios[aspectRatioIndex].vlcVal.flatMap { strdup($0) }
                     }
+                    statusToast = "Aspect: \(aspectRatios[aspectRatioIndex].label)"
                     resetHideTimer()
                 } label: {
-                    Text(aspectRatios[aspectRatioIndex].label)
-                        .font(.caption2.bold())
-                        .foregroundStyle(.white)
-                        .padding(.horizontal, 10)
-                        .padding(.vertical, 6)
-                        .background(.ultraThinMaterial)
-                        .background(Color.white.opacity(0.15))
-                        .clipShape(Capsule())
+                    Image(systemName: "arrow.up.left.and.arrow.down.right")
+                        .font(.system(size: 15, weight: .semibold))
+                        .foregroundStyle(.white.opacity(0.9))
                 }
+                .accessibilityLabel("Aspect ratio")
+
+                Button {
+                    showPlaybackOptions = true
+                } label: {
+                    Image(systemName: "ellipsis")
+                        .font(.system(size: 17, weight: .semibold))
+                        .foregroundStyle(.white)
+                }
+                .accessibilityLabel("Playback options")
             }
-            .padding(.horizontal, 18)
-            .padding(.top, 14)
+            .padding(.horizontal, 22)
+            .padding(.top, 16)
+            .padding(.bottom, 10)
             .background(
-                LinearGradient(colors: [Color.black.opacity(0.85), Color.clear], startPoint: .top, endPoint: .bottom)
+                LinearGradient(colors: [Color.black.opacity(0.8), Color.clear], startPoint: .top, endPoint: .bottom)
             )
 
             Spacer()
 
-            // Center Play / Pause & 10s Skip Buttons
-            HStack(spacing: 48) {
-                Button {
-                    seekBy(seconds: -10)
-                    resetHideTimer()
-                } label: {
-                    Image(systemName: "gobackward.10")
-                        .font(.system(size: 32, weight: .semibold))
-                        .foregroundStyle(.white)
-                }
-
-                Button {
-                    togglePlayPause()
-                    resetHideTimer()
-                } label: {
-                    Image(systemName: isPlaying ? "pause.circle.fill" : "play.circle.fill")
-                        .font(.system(size: 64))
-                        .foregroundStyle(.white)
-                }
-
-                Button {
-                    seekBy(seconds: 10)
-                    resetHideTimer()
-                } label: {
-                    Image(systemName: "goforward.10")
-                        .font(.system(size: 32, weight: .semibold))
-                        .foregroundStyle(.white)
-                }
-            }
-
-            Spacer()
-
-            // Bottom Timeline & Scrubber Bar
-            VStack(spacing: 8) {
-                // VLC-style volume row (speaker + slider)
-                HStack(spacing: 10) {
-                    Image(systemName: vlcVolumePercent == 0 ? "speaker.slash.fill" : "speaker.wave.2.fill")
-                        .font(.system(size: 14))
-                        .foregroundStyle(.white.opacity(0.9))
-                        .frame(width: 24)
-
-                    if currentEngine == .vlc {
-                        Slider(value: Binding(
-                            get: { Double(vlcVolumePercent) },
-                            set: { newV in
-                                vlcVolumePercent = Int(newV)
-                                vlcPlayer?.audio?.volume = Int32(Float(newV) / 100.0 * 256.0)
-                            }
-                        ), in: 0...100)
-                            .tint(Color(red: 0.35, green: 0.55, blue: 1.0))
-                        Text("\(vlcVolumePercent)%")
-                            .font(.caption2.monospacedDigit())
-                            .foregroundStyle(.white.opacity(0.85))
-                            .frame(width: 38, alignment: .trailing)
-                    } else {
-                        SystemVolumeSlider()
-                            .frame(height: 28)
-                    }
-                }
-                .padding(.horizontal, 4)
-
+            // Bottom — times, thin red scrubber, controls row (dx.bi chrome)
+            VStack(spacing: 0) {
                 if !isLive {
-                    Slider(
-                        value: $progressValue,
-                        in: 0.0...1.0,
-                        onEditingChanged: { editing in
-                            isScrubbing = editing
-                            if !editing {
-                                applyScrubSeek(to: progressValue)
-                            }
-                            resetHideTimer()
-                        }
-                    )
-                    .tint(Color(red: 0.35, green: 0.55, blue: 1.0))
-
-                    HStack {
+                    HStack(spacing: 0) {
                         Text(currentTimeText)
                             .font(.caption.monospacedDigit())
                             .foregroundStyle(.white.opacity(0.85))
                         Spacer()
-                        Text(totalTimeText)
+                        Text(remainingText)
                             .font(.caption.monospacedDigit())
                             .foregroundStyle(.white.opacity(0.85))
                     }
-                } else {
-                    HStack {
-                        HStack(spacing: 6) {
-                            Circle().fill(Color.red).frame(width: 8, height: 8)
-                            Text("LIVE BROADCAST")
-                                .font(.caption.bold())
-                                .foregroundStyle(.white)
+                    .padding(.horizontal, 22)
+
+                    DxScrubber(value: $progressValue) { editing in
+                        isScrubbing = editing
+                        if !editing {
+                            applyScrubSeek(to: progressValue)
                         }
-                        Spacer()
+                        resetHideTimer()
                     }
+                    .disabled(isBuffering)
+                    .padding(.horizontal, 22)
+                    .padding(.top, 4)
+                } else {
+                    HStack(spacing: 6) {
+                        Circle().fill(Color.red).frame(width: 8, height: 8)
+                        Text("LIVE")
+                            .font(.caption.bold())
+                            .foregroundStyle(.white)
+                        Spacer()
+                        Text(subtitle ?? title)
+                            .font(.caption)
+                            .foregroundStyle(.white.opacity(0.7))
+                            .lineLimit(1)
+                    }
+                    .padding(.horizontal, 22)
                 }
+
+                HStack(spacing: 22) {
+                    Button {
+                        togglePlayPause()
+                        resetHideTimer()
+                    } label: {
+                        Image(systemName: isPlaying ? "pause.fill" : "play.fill")
+                            .font(.system(size: 21, weight: .semibold))
+                            .foregroundStyle(.white)
+                    }
+
+                    Button {
+                        seekBy(seconds: -10)
+                        resetHideTimer()
+                    } label: {
+                        Image(systemName: "gobackward.10")
+                            .font(.system(size: 19, weight: .semibold))
+                            .foregroundStyle(.white.opacity(0.9))
+                    }
+
+                    Button {
+                        seekBy(seconds: 10)
+                        resetHideTimer()
+                    } label: {
+                        Image(systemName: "goforward.10")
+                            .font(.system(size: 19, weight: .semibold))
+                            .foregroundStyle(.white.opacity(0.9))
+                    }
+
+                    Button {
+                        toggleMute()
+                        resetHideTimer()
+                    } label: {
+                        Image(systemName: isMuted ? "speaker.slash.fill" : "speaker.wave.2.fill")
+                            .font(.system(size: 18, weight: .semibold))
+                            .foregroundStyle(.white.opacity(0.9))
+                    }
+
+                    Spacer(minLength: 12)
+
+                    Text(title)
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(.white)
+                        .lineLimit(1)
+
+                    Spacer(minLength: 12)
+
+                    Button {
+                        aspectRatioIndex = (aspectRatioIndex + 1) % aspectRatios.count
+                        if let p = vlcPlayer {
+                            p.videoAspectRatio = aspectRatios[aspectRatioIndex].vlcVal.flatMap { strdup($0) }
+                        }
+                        statusToast = "Aspect: \(aspectRatios[aspectRatioIndex].label)"
+                        resetHideTimer()
+                    } label: {
+                        Image(systemName: aspectRatios[aspectRatioIndex].label == "Fit" ? "rectangle" : "rectangle.expand.vertical")
+                            .font(.system(size: 17, weight: .semibold))
+                            .foregroundStyle(.white.opacity(0.9))
+                    }
+                    .accessibilityLabel("Aspect ratio")
+                }
+                .padding(.horizontal, 22)
+                .padding(.top, 14)
             }
-            .padding(.horizontal, 24)
-            .padding(.bottom, 24)
+            .padding(.bottom, 20)
+            .frame(maxWidth: .infinity)
             .background(
                 LinearGradient(colors: [Color.clear, Color.black.opacity(0.9)], startPoint: .top, endPoint: .bottom)
+                .ignoresSafeArea()
             )
+        }
+    }
+
+    // MARK: - dx.bi chrome helpers
+
+    /// "00:01:00" / "01:00" / "59" → seconds
+    static func clockSeconds(_ text: String) -> Int {
+        let parts = text.split(separator: ":").compactMap { Int($0) }
+        guard !parts.isEmpty else { return 0 }
+        var sec = 0
+        for p in parts { sec = sec * 60 + p }
+        return sec
+    }
+
+    /// Remaining clock text: over an hour "01:02:33", else "02:33"
+    static func formatRemaining(totalSeconds: Int, currentSeconds: Int) -> String {
+        let left = max(0, totalSeconds - currentSeconds)
+        let h = left / 3600, m = (left % 3600) / 60, s = left % 60
+        if h > 0 { return String(format: "%02d:%02d:%02d", h, m, s) }
+        return String(format: "%02d:%02d", m, s)
+    }
+
+    private func toggleMute() {
+        isMuted.toggle()
+        if currentEngine == .vlc {
+            if isMuted {
+                vlcVolumeBeforeMute = vlcVolumePercent == 0 ? 100 : vlcVolumePercent
+                vlcPlayer?.audio?.volume = 0
+            } else {
+                vlcPlayer?.audio?.volume = Int32(Float(vlcVolumeBeforeMute) / 100.0 * 256.0)
+                vlcVolumePercent = vlcVolumeBeforeMute
+            }
+        } else if let p = avPlayer {
+            p.isMuted = isMuted
         }
     }
 
@@ -768,6 +782,7 @@ struct UniversalFullScreenPlayerView: View {
                 if totalSec > 0 {
                     progressValue = currentSec / totalSec
                     totalTimeText = formatTime(seconds: totalSec)
+                    remainingText = "-" + formatRemaining(totalSeconds: Int(totalSec), currentSeconds: Int(currentSec))
                 }
             }
             currentTimeText = formatTime(seconds: currentSec)
@@ -1206,5 +1221,43 @@ struct StreamPlayerSheet: View {
         @unknown default:
             break
         }
+    }
+}
+
+// MARK: - dx.bi scrubber: the thin red line (drag to seek)
+
+struct DxScrubber: View {
+    @Binding var value: Double
+    var onEditing: (Bool) -> Void
+
+    var body: some View {
+        GeometryReader { g in
+            ZStack(alignment: .leading) {
+                Capsule()
+                    .fill(.white.opacity(0.22))
+                    .frame(height: 3)
+                Capsule()
+                    .fill(Dx.accent)
+                    .frame(width: max(0, min(1, value)) * g.size.width, height: 3)
+                Circle()
+                    .fill(.white)
+                    .frame(width: 11, height: 11)
+                    .shadow(color: .black.opacity(0.5), radius: 3)
+                    .offset(x: max(0, min(1, value)) * (g.size.width - 11))
+            }
+            .frame(height: g.size.height, alignment: .center)
+            .contentShape(Rectangle())
+            .gesture(
+                DragGesture(minimumDistance: 0)
+                    .onChanged { v in
+                        onEditing(true)
+                        value = min(max(0, v.location.x / max(g.size.width, 1)), 1)
+                    }
+                    .onEnded { _ in
+                        onEditing(false)
+                    }
+            )
+        }
+        .frame(height: 26)
     }
 }

@@ -1,8 +1,9 @@
 import SwiftUI
 
-// MARK: - dx.bi StreamsSheet (ported from dxbi-stremio ios/Dxbi/UI/StreamsSheet.swift)
-// The streams for one film or episode: the pick at the top (the stream chosen last time, else the
-// best that's ready), then every stream with its quality, source and provider, to filter and sort.
+// MARK: - dx.bi streams panel (styled like dxbi-stremio's title-page addon panel)
+// The white best-pick card, then the addon panel: sort/provider chips, the stream count,
+// one clean row per addon (bold provider left, quality/muted info right) and the red
+// "Install addons" button at the end.
 
 struct DxStreamsSheet: View {
     var heading: String
@@ -11,6 +12,10 @@ struct DxStreamsSheet: View {
     var isResolving: Bool
     var lastPick: DxLastPick?
     var onPlay: (StreamSource) -> Void
+
+    @EnvironmentObject private var mainVM: MainViewModel
+    @EnvironmentObject private var vodVM: VODViewModel
+    @State private var showAddons = false
 
     private enum Sort: String, CaseIterable {
         case best = "Best Quality", provider = "Addon Order"
@@ -27,7 +32,7 @@ struct DxStreamsSheet: View {
         if q.contains("1080") { return 1080 }
         if q.contains("720") { return 720 }
         if q.contains("480") { return 480 }
-        return q.lowercased().contains("4k") ? 2160 : 480
+        return 480
     }
 
     private var shown: [StreamSource] {
@@ -50,10 +55,15 @@ struct DxStreamsSheet: View {
     var body: some View {
         NavigationStack {
             ScrollView {
-                LazyVStack(alignment: .leading, spacing: 10) {
+                LazyVStack(alignment: .leading, spacing: 0) {
                     if let best { pick(best) }
-                    if !items.isEmpty { filters }
-                    ForEach(Array(shown.enumerated()), id: \.element.id) { _, s in row(s) }
+                    if !items.isEmpty { panelHeader }
+                    if !items.isEmpty {
+                        LazyVStack(spacing: 0) {
+                            ForEach(Array(shown.enumerated()), id: \.element.id) { _, s in row(s) }
+                        }
+                    }
+                    installAddons
                     status
                 }
                 .padding(.horizontal, 16)
@@ -61,6 +71,11 @@ struct DxStreamsSheet: View {
             }
             .navigationTitle(heading)
             .navigationBarTitleDisplayMode(.inline)
+        }
+        .sheet(isPresented: $showAddons) {
+            NavigationStack {
+                SettingsNetflixView(vodVM: vodVM, liveVM: mainVM)
+            }
         }
     }
 
@@ -82,40 +97,67 @@ struct DxStreamsSheet: View {
         }
         .buttonStyle(.plain)
         .padding(.top, 6)
+        .padding(.bottom, 16)
     }
 
-    private var filters: some View {
-        let qualities = Array(Set(items.compactMap(\.quality))).sorted { a, b in
-            Self.res(StreamSource(url: "x", quality: a)) > Self.res(StreamSource(url: "x", quality: b))
-        }
-        let providers = Array(Set(items.compactMap(\.provider).filter { !$0.isEmpty })).sorted()
-        return ScrollView(.horizontal) {
+    /** dx.bi's panel header: "Addon order" + "Provider" drop-down chips, stream count at the right */
+    private var panelHeader: some View {
+        VStack(spacing: 14) {
             HStack(spacing: 8) {
                 Menu {
                     Picker("Sort", selection: $sort) { ForEach(Sort.allCases, id: \.self) { Text($0.rawValue).tag($0) } }
-                } label: { chip(sort.rawValue) }
-                if qualities.count > 1 {
-                    Menu {
-                        Picker("Quality", selection: $quality) {
-                            Text("Any Quality").tag(String?.none)
-                            ForEach(qualities, id: \.self) { Text($0).tag(String?.some($0)) }
-                        }
-                    } label: { chip(quality ?? "Any Quality") }
+                } label: {
+                    chip(sort == .best ? "Addon order" : sort.rawValue)
                 }
                 if providers.count > 1 {
                     Menu {
                         Picker("Source", selection: $provider) {
-                            Text("Any Source").tag(String?.none)
+                            Text("Any Provider").tag(String?.none)
                             ForEach(providers, id: \.self) { Text($0).tag(String?.some($0)) }
                         }
-                    } label: { chip(provider ?? "Any Source") }
+                    } label: {
+                        chip(provider ?? "Provider")
+                    }
                 }
+                Spacer(minLength: 0)
+                Text("\(items.count) stream\(items.count == 1 ? "" : "s")")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(Dx.muted)
             }
-            .padding(.vertical, 4)
+            if qualities.count > 1 {
+                ScrollView(.horizontal) {
+                    HStack(spacing: 8) {
+                        ForEach(qualities, id: \.self) { q in
+                            Button { quality = (quality == q) ? nil : q } label: {
+                                Text(q)
+                                    .font(.subheadline.weight(.semibold))
+                                    .padding(.horizontal, 12).padding(.vertical, 6)
+                                    .foregroundStyle(quality == q ? .black : .white)
+                                    .background(quality == q ? AnyShapeStyle(.white) : AnyShapeStyle(.clear), in: .capsule)
+                                    .dxGlass(interactive: true, hidden: quality == q, in: .capsule)
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                    .padding(.horizontal, 2)
+                }
+                .scrollIndicators(.hidden)
+            }
         }
-        .scrollIndicators(.hidden)
+        .padding(.bottom, 10)
     }
 
+    private var qualities: [String] {
+        Array(Set(items.compactMap(\.quality))).sorted { a, b in
+            Self.res(StreamSource(url: "x", quality: a)) > Self.res(StreamSource(url: "x", quality: b))
+        }
+    }
+
+    private var providers: [String] {
+        Array(Set(items.compactMap(\.provider).filter { !$0.isEmpty })).sorted()
+    }
+
+    /** Sort / provider drop-down chips (dx.bi's "Addon order · Provider" pair) */
     private func chip(_ text: String, on: Bool = false, menu: Bool = true) -> some View {
         HStack(spacing: 4) {
             Text(text)
@@ -129,36 +171,56 @@ struct DxStreamsSheet: View {
         .dxGlass(interactive: true, hidden: on, in: .capsule)
     }
 
+    /** One clean panel row: bold provider left, quality/muted info right (dx.bi's list) */
     private func row(_ s: StreamSource) -> some View {
         let picked = lastPick != nil && s.url == lastPick?.url
         return Button { onPlay(s) } label: {
-            VStack(alignment: .leading, spacing: 6) {
-                HStack(spacing: 6) {
-                    if let q = s.quality, !q.isEmpty { DxBadge(text: q.uppercased(), filled: true) }
-                    if let t = s.type, t == "embed" { DxBadge(text: "EMBED", colour: .yellow) }
-                    if let p = s.provider, !p.isEmpty { DxBadge(text: p.uppercased()) }
-                    Spacer(minLength: 0)
-                    if s.preferVLC == true { DxBadge(text: "MKV/TS", colour: Dx.muted) }
+            VStack(alignment: .leading, spacing: 4) {
+                HStack(alignment: .firstTextBaseline, spacing: 12) {
+                    Text(s.provider?.isEmpty == false ? s.provider! : "Source")
+                        .font(.headline)
+                        .foregroundStyle(picked ? Dx.accent : .white)
+                        .lineLimit(1)
+                    Spacer(minLength: 8)
+                    Text([s.quality, s.type == "embed" ? "Embed" : "Direct"].compactMap { $0 }.joined(separator: " · "))
+                        .font(.subheadline)
+                        .foregroundStyle(Dx.muted)
+                        .lineLimit(1)
                 }
                 Text(s.url)
                     .font(.caption)
                     .foregroundStyle(Dx.faint)
                     .lineLimit(2)
                     .multilineTextAlignment(.leading)
-                Text(s.provider ?? "Source")
-                    .font(.headline)
-                    .lineLimit(1)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(14)
-            .background(Dx.raised.opacity(0.7), in: .rect(cornerRadius: 18))
-            .overlay(RoundedRectangle(cornerRadius: 18).strokeBorder(picked ? Dx.accent : .clear, lineWidth: 1.5))
+            .padding(.vertical, 13)
+            .overlay(alignment: .bottom) {
+                Rectangle().fill(.white.opacity(0.08)).frame(height: 0.7)
+            }
         }
         .buttonStyle(.plain)
         .contextMenu {
             Button { onPlay(s) } label: { Label("Play", systemImage: "play.fill") }
             Button { UIPasteboard.general.string = s.url } label: { Label("Copy Stream URL", systemImage: "doc.on.doc") }
         }
+    }
+
+    /** dx.bi's red Install addons button */
+    private var installAddons: some View {
+        Button { showAddons = true } label: {
+            HStack(spacing: 10) {
+                Image(systemName: "puzzlepiece.extension.fill")
+                    .font(.system(size: 17, weight: .semibold))
+                Text("Install addons")
+                    .font(.headline)
+            }
+            .frame(maxWidth: .infinity, minHeight: 50)
+        }
+        .foregroundStyle(.white)
+        .background(Dx.accent, in: .rect(cornerRadius: 16))
+        .buttonStyle(.plain)
+        .padding(.top, 22)
     }
 
     @ViewBuilder

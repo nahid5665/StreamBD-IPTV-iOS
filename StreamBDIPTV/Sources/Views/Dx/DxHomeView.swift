@@ -7,10 +7,8 @@ import SwiftUI
 struct DxHomeView: View {
     @ObservedObject var mainVM: MainViewModel
     @ObservedObject var vodVM: VODViewModel
-    @StateObject private var eventsVM = EventsViewModel()
     @State private var kind: String? = nil
     @State private var account = false
-    @State private var activeChannel: Channel? = nil
 
     var body: some View {
         GeometryReader { g in
@@ -23,8 +21,6 @@ struct DxHomeView: View {
                         Color.clear.frame(height: 90)
                     }
                     kinds
-                    if kind == nil { liveRow }
-                    if kind == nil { eventsRow }
                     if kind == nil || kind == "movie" {
                         dxRow("Top 10 Today in Bangladesh", vodVM.top10Media, rank: true)
                         dxRow("Trending Movies", vodVM.trendingMovies)
@@ -60,8 +56,6 @@ struct DxHomeView: View {
         .sheet(isPresented: $account) {
             DxAccountSheet(mainVM: mainVM, vodVM: vodVM)
         }
-        .task { await eventsVM.loadEvents() }
-        .refreshable { await eventsVM.loadEvents() }
     }
 
     private var billboard: TmdbMedia? {
@@ -95,47 +89,6 @@ struct DxHomeView: View {
         .scrollIndicators(.hidden)
     }
 
-    /** The BDTube server's channels, sideways like every other row; a tap plays at once */
-    private var liveRow: some View {
-        DxShelf(title: "Live TV", see: nil) {
-            ForEach(mainVM.allChannels.prefix(12), id: \.self) { ch in
-                Button { activeChannel = ch } label: {
-                    DxChannelCard(channel: ch, width: 132)
-                }
-                .buttonStyle(.plain)
-            }
-        }
-        .opacity(mainVM.allChannels.isEmpty ? 0 : 1)
-        .sheet(item: $activeChannel) { ch in
-            StreamPlayerSheet(channel: ch)
-        }
-    }
-
-    /** Live events, as dx.bi's airing cards */
-    @ViewBuilder
-    private var eventsRow: some View {
-        let live = eventsVM.events.filter { $0.isLiveNow }
-        let upcoming = eventsVM.events.filter { !$0.isLiveNow }
-        if !live.isEmpty || !upcoming.isEmpty {
-            VStack(alignment: .leading, spacing: 22) {
-                if !live.isEmpty {
-                    DxShelf(title: "Live Now") {
-                        ForEach(live.prefix(8)) { ev in
-                            DxEventButton(event: ev, width: 272)
-                        }
-                    }
-                }
-                if !upcoming.isEmpty {
-                    DxShelf(title: "Upcoming") {
-                        ForEach(upcoming.prefix(8)) { ev in
-                            DxEventButton(event: ev, width: 272)
-                        }
-                    }
-                }
-            }
-        }
-    }
-
     private func dxRow(_ name: String, _ items: [TmdbMedia], rank: Bool = false) -> some View {
         Group {
             if !items.isEmpty {
@@ -159,38 +112,6 @@ struct DxHomeView: View {
             }
         }
         .redacted(reason: .placeholder)
-    }
-}
-
-/** An event card that plays: the event's channel resolves, then the player opens */
-struct DxEventButton: View {
-    var event: SportzfyEvent
-    var width: CGFloat
-    @StateObject private var eventsVM = EventsViewModel()
-    @State private var channel: Channel? = nil
-    @State private var busy = false
-
-    var body: some View {
-        Button {
-            guard !busy else { return }
-            busy = true
-            Task {
-                channel = await eventsVM.fetchEventChannel(for: event)
-                busy = false
-                if channel == nil {
-                    DxToast.shared.show?("No stream for this event yet")
-                }
-            }
-        } label: {
-            DxEventCard(event: event, width: width)
-                .overlay {
-                    if busy { ProgressView().tint(.white) }
-                }
-        }
-        .buttonStyle(.plain)
-        .sheet(item: $channel) { ch in
-            StreamPlayerSheet(channel: ch)
-        }
     }
 }
 
