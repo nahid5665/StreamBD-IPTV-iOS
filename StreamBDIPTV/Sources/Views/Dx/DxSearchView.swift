@@ -68,7 +68,7 @@ struct DxSearchView: View {
         .navigationTitle("Search")
         .searchable(text: $query, prompt: "Films, shows, channels")
         .onSubmit(of: .search, run)
-        .onChange(of: query) { _, q in if q.isEmpty { searched = "" } }
+        .onChange(of: query) { q in if q.isEmpty { searched = "" } }
         .sheet(item: $activeChannel) { ch in
             StreamPlayerSheet(channel: ch)
         }

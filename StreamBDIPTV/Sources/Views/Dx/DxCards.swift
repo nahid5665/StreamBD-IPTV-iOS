@@ -72,7 +72,7 @@ struct DxChannelCard: View {
             ZStack {
                 Rectangle().fill(Dx.raised)
                 if let logo = URL(string: channel.logo) {
-                    DxArt(url: logo, contentMode: .contain).padding(10)
+                    DxArt(url: logo, contentMode: .fit).padding(10)
                 } else {
                     Text(initials)
                         .font(.system(size: width * 0.16, weight: .heavy, design: .rounded))

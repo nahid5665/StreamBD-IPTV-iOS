@@ -237,7 +237,7 @@ struct DxTitleView: View {
                 Image(systemName: "ellipsis").font(.system(size: 20, weight: .semibold)).frame(width: 36, height: 36)
             }
             .dxGlassButton()
-            .buttonBorderShape(.circle)
+            .dxCircleBorder()
         }
         .frame(maxWidth: 400)
     }

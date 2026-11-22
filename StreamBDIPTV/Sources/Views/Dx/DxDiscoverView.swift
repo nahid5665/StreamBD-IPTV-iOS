@@ -160,8 +160,10 @@ struct DxCatalogGrid: View {
     }
 
     private func fetch() {
-        let sep = catalog.path.contains("?") ? "&" : "?"
-        let urlString = "\(AppConfig.tmdbBaseURL)/\(catalog.path)\(sep)api_key=\(AppConfig.tmdbApiKey)&page=\(page)"
+        // `catalog` holds the selected spec's path directly (e.g. "trending/movie/week" or
+        // "discover/movie?with_original_language=bn&sort_by=popularity.desc")
+        let sep = catalog.contains("?") ? "&" : "?"
+        let urlString = "\(AppConfig.tmdbBaseURL)/\(catalog)\(sep)api_key=\(AppConfig.tmdbApiKey)&page=\(page)"
         guard !loading, let url = URL(string: urlString) else { return }
         loading = true
         Task {

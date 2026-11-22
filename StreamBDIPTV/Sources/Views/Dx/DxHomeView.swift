@@ -212,10 +212,9 @@ struct DxBillboard: View {
         .clipped()
         .contentShape(.rect)
         .onTapGesture { opened = media }
-        .background(
-            NavigationLink(value: DxRoute.title(media), isActive: Binding(get: { opened != nil }, set: { if !$0 { opened = nil } })) { EmptyView() }
-                .opacity(0)
-        )
+        .navigationDestination(isPresented: Binding(get: { opened != nil }, set: { if !$0 { opened = nil } })) {
+            DxTitleView(media: media)
+        }
     }
 
     private var picture: some View {
@@ -224,7 +223,7 @@ struct DxBillboard: View {
                 .frame(maxWidth: .infinity)
                 .frame(height: height)
                 .overlay {
-                    DxArt(url: media.backdropURL)
+                    DxArt(url: URL(string: media.backdropURL))
                 }
                 .clipped()
                 .overlay(LinearGradient(stops: [.init(color: .black.opacity(0.35), location: 0), .init(color: .clear, location: 0.25), .init(color: .clear, location: 0.45), .init(color: .black, location: 0.92)], startPoint: .top, endPoint: .bottom))
@@ -237,7 +236,7 @@ struct DxBillboard: View {
                 if !media.displayDate.isEmpty { DxBadge(text: media.displayDate) }
                 DxTitleLogo(name: media.displayTitle, maxHeight: 110, textSize: 40)
                     .frame(maxWidth: 320)
-                Text([dxTypeName(media.isMovie ? "movie" : "series")] + (media.genrePreview))
+                Text([dxTypeName(media.isMovie ? "movie" : "series")] + media.genrePreview)
                     .font(.subheadline)
                     .foregroundStyle(Dx.muted)
                 if let d = media.overview {

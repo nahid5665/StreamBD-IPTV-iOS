@@ -29,12 +29,11 @@ struct DxLogo: View {
 // MARK: - Compat (iOS 16 minimum; dx.bi's Compat.swift pattern)
 
 extension View {
-    /// Liquid Glass behind a view (frosted material before iOS 26); `hidden` shows none.
+    /// Frosted glass behind a view (the iOS 26 Liquid Glass API needs a newer SDK than CI has;
+    /// ultraThinMaterial reads the same on black). `hidden` shows none.
     @ViewBuilder
     func dxGlass<S: Shape>(interactive: Bool = false, hidden: Bool = false, in shape: S) -> some View {
-        if #available(iOS 26.0, *) {
-            self.glassEffect(hidden ? .identity : (interactive ? .regular.interactive() : .regular), in: shape)
-        } else if hidden {
+        if hidden {
             self
         } else {
             self.background(.ultraThinMaterial, in: shape)
@@ -43,12 +42,22 @@ extension View {
 
     @ViewBuilder
     func dxGlassButton() -> some View {
-        if #available(iOS 26.0, *) { self.buttonStyle(.glass) } else { self.buttonStyle(.bordered) }
+        self.buttonStyle(.bordered)
     }
 
     @ViewBuilder
     func dxGlassProminentButton() -> some View {
-        if #available(iOS 26.0, *) { self.buttonStyle(.glassProminent) } else { self.buttonStyle(.borderedProminent) }
+        self.buttonStyle(.borderedProminent)
+    }
+
+    /// Circle button border on iOS 17+, capsule before it.
+    @ViewBuilder
+    func dxCircleBorder() -> some View {
+        if #available(iOS 17.0, *) {
+            self.buttonBorderShape(.circle)
+        } else {
+            self.buttonBorderShape(.capsule)
+        }
     }
 
     /// Zoom transition when a card opens its title page (iOS 18+; plain push before).
@@ -157,7 +166,7 @@ struct DxGlassCircle: View {
                 .dxSymbolReplace()
         }
         .dxGlassButton()
-        .buttonBorderShape(.circle)
+        .dxCircleBorder()
         .accessibilityLabel(label)
     }
 }
