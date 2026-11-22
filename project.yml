@@ -26,8 +26,8 @@ targets:
     info:
       path: StreamBDIPTV/Info.plist
       properties:
-        CFBundleDisplayName: "Eentertainment"
-        CFBundleName: "Eentertainment"
+        CFBundleDisplayName: "dx.bi"
+        CFBundleName: "dx.bi"
         CFBundleIdentifier: "com.eentertainment.app"
         CFBundleShortVersionString: "5.8.2"
         CFBundleVersion: "74"
