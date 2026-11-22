@@ -309,7 +309,7 @@ struct NetflixHomeView: View {
             HStack {
                 Text("Featured IPTV Playlists").font(.title3.bold()).foregroundStyle(.white)
                 Spacer()
-                Text("44 Playlists")
+                Text("\(liveVM.playlists.count) Server\(liveVM.playlists.count == 1 ? "" : "s")")
                     .font(.caption.bold())
                     .foregroundStyle(Color(red: 0.4, green: 0.6, blue: 1.0))
             }
@@ -695,8 +695,8 @@ struct LiveTVNetflixView: View {
                 }
             }
             .background(Color.black.ignoresSafeArea())
-            .navigationTitle("Live Playlists (44)")
-            .searchable(text: $viewModel.searchQuery, prompt: "Search 44 playlists…")
+            .navigationTitle("Live TV (\(viewModel.playlists.count))")
+            .searchable(text: $viewModel.searchQuery, prompt: "Search live TV servers…")
             .sheet(item: $viewModel.activePlaylist) { pl in
                 PlaylistChannelListView(playlist: pl, viewModel: viewModel)
             }

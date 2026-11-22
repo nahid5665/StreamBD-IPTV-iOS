@@ -55,20 +55,22 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: v5.8.2-eentertainment
-          name: "Eentertainment v5.8.2 — Remote Registry Merge Removed (Addon List Is Final)"
+          name: "Eentertainment v5.8.2 — JS Addon Persistence Fix + BDTube Live Server"
           body: |
             ### Eentertainment v5.8.2
 
-            🧹 **The 20 extra addons are really gone now**
-
-            #### What's Fixed in v5.8.2:
-            1. **Root cause of the 23-addon list**: at startup the app was fetching the remote
-               addon registry (StreamBD_IPTV_Addon.json) and appending ALL of its addons on top
-               of the bundled ones — undoing the trim. The remote merge is removed entirely.
-            2. **Addon list is now final**: exactly the 3 bundled resolvers (Cineplex BD, CTG
-               Movies FTP, RoarZone EMBY) plus any addons you personally add in Settings
-               (.js scraper URLs or Stremio manifests). Movie pages only check those.
-            3. Combined with the 10-minute result cache from v5.7.9, repeat visits are instant.
+            #### What's Fixed in this build:
+            1. **JS addons no longer erased on restart**: user-added `.js` addons were
+               never saved to UserDefaults (only Stremio addons were persisted), so they
+               vanished every relaunch. Both kinds are persisted now.
+            2. **Live TV replaced with the BDTube server**: all bundled StreamBD/BDIX/
+               Jio/PlusBox playlist servers removed. Live TV now loads channels from the
+               BDTube API (TV endpoint `:8889` first, web endpoint fallback).
+            3. **Auto token refresh (BDTube widget parity)**: the app parses the signed
+               `session=...-<start>-<expiry>` timestamps in stream URLs and auto-refreshes
+               30 minutes before expiry (or every 2h max), swapping fresh URLs in-place
+               without interrupting playback.
+            4. Combined with the 10-minute result cache from v5.7.9, repeat visits are instant.
           files: Eentertainment-v5.8.2-iOS.ipa
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

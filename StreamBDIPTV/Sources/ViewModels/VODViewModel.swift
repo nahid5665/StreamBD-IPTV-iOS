@@ -77,7 +77,10 @@ final class VODViewModel: ObservableObject {
     }
 
     private func saveCustomAddons() {
-        let custom = addons.filter { $0.id.hasPrefix("stremio_") }
+        // Persist BOTH custom addon kinds: Stremio manifests (stremio_) and
+        // user-added JS addons (js_). Filtering only stremio_ made every
+        // manually-added .js addon vanish on the next launch.
+        let custom = addons.filter { $0.id.hasPrefix("stremio_") || $0.id.hasPrefix("js_") }
         if let data = try? JSONEncoder().encode(custom) {
             UserDefaults.standard.set(data, forKey: customAddonsKey)
         }
