@@ -32,6 +32,8 @@ targets:
         CFBundleShortVersionString: "5.8.2"
         CFBundleVersion: "74"
         LSRequiresIPhoneOS: true
+        UIAppFonts:
+          - bebas_neue.ttf
         UILaunchScreen:
           UIColorName: ""
         UISupportedInterfaceOrientations:

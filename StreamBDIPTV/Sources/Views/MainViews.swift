@@ -1723,7 +1723,7 @@ struct SettingsNetflixView: View {
 struct EentertainmentApp: App {
     var body: some Scene {
         WindowGroup {
-            ContentView()
+            DxRootView()
         }
     }
 }

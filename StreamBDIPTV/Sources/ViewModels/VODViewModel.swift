@@ -20,6 +20,7 @@ final class VODViewModel: ObservableObject {
     @Published var isResolvingAddons: Bool = false
 
     private var imdbIdCache: [Int: String] = [:]
+    private var castCache: [Int: [TmdbCastMember]] = [:]
     private var activeLookupTask: Task<Void, Never>? = nil
 
     private let customAddonsKey = "eentertainment_custom_addons_v2"
@@ -162,6 +163,19 @@ final class VODViewModel: ObservableObject {
         }
         imdbIdCache[tmdbId] = imdb
         return imdb
+    }
+
+    /// The title's cast & crew (TMDB credits), for the dx.bi-style circles
+    func fetchCast(tmdbId: Int, isTV: Bool) async -> [TmdbCastMember] {
+        if let cached = castCache[tmdbId] { return cached }
+        let endpoint = isTV ? "tv" : "movie"
+        let url = "\(AppConfig.tmdbBaseURL)/\(endpoint)/\(tmdbId)/credits?api_key=\(AppConfig.tmdbApiKey)&language=en-US"
+        if let res = try? await NetworkManager.shared.fetchDecodable(TmdbCredits.self, from: url) {
+            let cast = Array((res.cast ?? []).prefix(15))
+            castCache[tmdbId] = cast
+            return cast
+        }
+        return []
     }
 
     /// Resolves all available BDIX FTP servers + Global stream sources for a title using all configured addons

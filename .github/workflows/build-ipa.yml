@@ -55,22 +55,20 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: v5.8.2-eentertainment
-          name: "Eentertainment v5.8.2 — JS Addon Persistence Fix + BDTube Live Server"
+          name: "Eentertainment v5.8.2 — dx.bi UI Clone"
           body: |
-            ### Eentertainment v5.8.2
+            ### Eentertainment v5.8.2 — dx.bi UI
 
-            #### What's Fixed in this build:
-            1. **JS addons no longer erased on restart**: user-added `.js` addons were
-               never saved to UserDefaults (only Stremio addons were persisted), so they
-               vanished every relaunch. Both kinds are persisted now.
-            2. **Live TV replaced with the BDTube server**: all bundled StreamBD/BDIX/
-               Jio/PlusBox playlist servers removed. Live TV now loads channels from the
-               BDTube API (TV endpoint `:8889` first, web endpoint fallback).
-            3. **Auto token refresh (BDTube widget parity)**: the app parses the signed
-               `session=...-<start>-<expiry>` timestamps in stream URLs and auto-refreshes
-               30 minutes before expiry (or every 2h max), swapping fresh URLs in-place
-               without interrupting playback.
-            4. Combined with the 10-minute result cache from v5.7.9, repeat visits are instant.
+            #### This build:
+            1. **Full dx.bi UI clone** (from notdxbi/dxbi-stremio ios/Dxbi): Apple TV-style
+               Home with auto-rotating billboard, Netflix-red accent, Liquid Glass buttons,
+               Bebas Neue DX.BI logo and intro splash, Top-10 rank numbers, zoom navigation
+               transitions, 4 tabs (Home · Discover · Library · Search), settings behind
+               the avatar.
+            2. **StreamsSheet**: white "Play · Same as Last Time" card, quality/source filter
+               chips, badge rows for every addon stream (dx.bi's way: last pick replays at once).
+            3. Live TV (BDTube server) stays wired with auto token refresh; live events on Home.
+            4. Previous fixes kept: JS addon persistence, BDTube token auto-refresh.
           files: Eentertainment-v5.8.2-iOS.ipa
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
