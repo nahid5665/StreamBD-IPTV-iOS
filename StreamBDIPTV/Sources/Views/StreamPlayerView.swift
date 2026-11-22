@@ -325,7 +325,7 @@ struct UniversalFullScreenPlayerView: View {
                         isBuffering = false
                         currentTimeText = curr.stringValue
                         totalTimeText = total.stringValue
-                        remainingText = "-" + formatRemaining(totalSeconds: Self.clockSeconds(total.stringValue),
+                        remainingText = Self.formatRemaining(totalSeconds: Self.clockSeconds(total.stringValue),
                                                               currentSeconds: Self.clockSeconds(curr.stringValue))
                         if let p = vlcPlayer {
                             progressValue = Double(p.position)
@@ -782,7 +782,7 @@ struct UniversalFullScreenPlayerView: View {
                 if totalSec > 0 {
                     progressValue = currentSec / totalSec
                     totalTimeText = formatTime(seconds: totalSec)
-                    remainingText = "-" + formatRemaining(totalSeconds: Int(totalSec), currentSeconds: Int(currentSec))
+                    remainingText = Self.formatRemaining(totalSeconds: Int(totalSec), currentSeconds: Int(currentSec))
                 }
             }
             currentTimeText = formatTime(seconds: currentSec)
