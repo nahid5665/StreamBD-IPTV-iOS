@@ -9,56 +9,45 @@ final class TokenRefreshManager: ObservableObject {
     @Published var isRefreshing: Bool = false
     @Published var tokenStatus: String = "Ready"
 
-    /// Called after every successful BDTube channel refresh with the fresh
-    /// channel list. MainViewModel registers a hook that swaps the signed URLs
-    /// into its caches without interrupting active playback (BDTube widget parity).
-    var liveChannelRefresher: (@MainActor ([Channel]) -> Void)? = nil
-
-    // Active tokens cache (kept for user-added playlists; e.g. PlusBox URLs)
+    // Active tokens cache
     private var activeTokens: [String: String] = [:]
     private var plusBoxChannelTokens: [String: (token: String, timestamp: Date)] = [:]
     private var timerCancellable: AnyCancellable?
 
     private init() {
-        startScheduledRefreshTimer(delay: AppConfig.bdTubeRefreshInterval)
+        startScheduledRefreshTimer()
     }
 
-    /// Starts a periodic refresh loop. The interval is dynamic:
-    /// min(2h, signed session expiry − 30min), floored at 60s — ported from
-    /// the BDTube widget's Tok.schedule/Tok.delay.
-    func startScheduledRefreshTimer(delay: TimeInterval) {
+    /// Starts a periodic 2-hour (7200 seconds) refresh loop
+    func startScheduledRefreshTimer() {
         timerCancellable?.cancel()
-        timerCancellable = Timer.publish(every: delay, on: .main, in: .common)
+        timerCancellable = Timer.publish(every: 7200, on: .main, in: .common)
             .autoconnect()
             .sink { [weak self] _ in
                 Task { [weak self] in
                     await self?.refreshAllTokens()
                 }
             }
-        addonLog("[TokenRefresh] next auto-refresh in \(Int(delay))s")
     }
 
-    /// Refresh all playlist tokens immediately (at launch and on schedule)
+    /// Refresh all playlist tokens immediately (called at launch and every 2 hours)
     func refreshAllTokens() async {
         guard !isRefreshing else { return }
         isRefreshing = true
-        tokenStatus = "Refreshing live tokens…"
+        tokenStatus = "Refreshing playlist tokens…"
 
-        // 1. Refresh the BDTube server list (signed session URLs)
-        let freshChannels = await BDTubeService.shared.refresh()
-        if !freshChannels.isEmpty {
-            liveChannelRefresher?(freshChannels)
-        }
+        // 1. Refresh Jio TV Session Tokens (S1 & S2)
+        await refreshJioSessionToken()
 
         // 2. Clear old cached PlusBox channel tokens so fresh ones are requested on next play
         plusBoxChannelTokens.removeAll()
 
+        // 3. Refresh Oxoo Portal Tokens
+        refreshOxooPortalTokens()
+
         lastRefreshTime = Date()
         isRefreshing = false
         tokenStatus = "Tokens Active (\(DateFormatter.localizedString(from: Date(), dateStyle: .none, timeStyle: .short)))"
-
-        // 3. Re-schedule from the parsed session expiry (BDTube widget parity)
-        startScheduledRefreshTimer(delay: BDTubeService.shared.nextRefreshDelay())
     }
 
     /// Dynamically fetches a fresh token for a specific PlusBox channel on demand
@@ -125,6 +114,15 @@ final class TokenRefreshManager: ObservableObject {
             }
         }
 
+        // Jio TV Token Replacement
+        if rawUrl.contains("workers.dev") || channel.group.localizedCaseInsensitiveContains("Jio") {
+            if let sessionCookie = activeTokens["jio_session"] {
+                headers["Cookie"] = sessionCookie
+                headers["Referer"] = "https://jp.ipl2026.workers.dev/"
+                headers["Origin"] = "https://jp.ipl2026.workers.dev"
+            }
+        }
+
         // Toffee headers
         if rawUrl.contains("toffeelive") || channel.group.localizedCaseInsensitiveContains("Toffee") {
             headers["User-Agent"] = "Toffee (Linux; Android 12; Pixel 6) ExoPlayerLib/2.18.1"
@@ -132,5 +130,25 @@ final class TokenRefreshManager: ObservableObject {
         }
 
         return (finalUrl, headers)
+    }
+
+    // MARK: - Private Token Refreshers
+
+    private func refreshJioSessionToken() async {
+        guard let url = URL(string: "https://s.ipl2026.workers.dev/create-session") else { return }
+        var req = URLRequest(url: url)
+        req.setValue("https://jp.ipl2026.workers.dev", forHTTPHeaderField: "Origin")
+        req.setValue("https://jp.ipl2026.workers.dev/", forHTTPHeaderField: "Referer")
+        req.timeoutInterval = 7
+
+        if let (data, _) = try? await URLSession.shared.data(for: req),
+           let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+           let sessionId = json["sessionId"] as? String {
+            activeTokens["jio_session"] = "session=\(sessionId)"
+        }
+    }
+
+    private func refreshOxooPortalTokens() {
+        activeTokens["oxoo_default"] = "Basic YWRtaW46MTIzNA=="
     }
 }

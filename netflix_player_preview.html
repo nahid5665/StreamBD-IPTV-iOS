@@ -1,0 +1,680 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>react-netflix-player-pro • Exact 1:1 Preview</title>
+  <script src="https://www.gstatic.com/antigravity/web/dev/tailwindcss.min.js"></script>
+  <style>
+    .custom-scrollbar::-webkit-scrollbar {
+      width: 4px;
+    }
+    .custom-scrollbar::-webkit-scrollbar-track {
+      background: rgba(255, 255, 255, 0.05);
+    }
+    .custom-scrollbar::-webkit-scrollbar-thumb {
+      background: rgba(255, 255, 255, 0.3);
+      border-radius: 4px;
+    }
+    .custom-scrollbar::-webkit-scrollbar-thumb:hover {
+      background: rgba(255, 255, 255, 0.5);
+    }
+    video::-webkit-media-controls {
+      display: none !important;
+    }
+  </style>
+</head>
+<body class="bg-slate-950 text-white font-sans antialiased p-3 md:p-6 min-h-screen select-none">
+
+  <!-- Header & Settings-Only Player Selector Notice -->
+  <div class="max-w-6xl mx-auto space-y-4">
+    <div class="flex flex-wrap items-center justify-between gap-3 pb-3 border-b border-slate-800">
+      <div>
+        <div class="flex items-center gap-2">
+          <span class="px-2 py-0.5 text-xs font-black bg-red-600 text-white rounded">1:1 MATCH</span>
+          <h1 class="text-xl font-bold tracking-tight">Izalsye / react-netflix-player-pro • Native Interface</h1>
+        </div>
+        <p class="text-xs text-slate-400 mt-0.5">Exact replica of symbols, sizes, typography, metadata tags, popup menus, and placements from the repository.</p>
+      </div>
+
+      <!-- Settings Mode Indicator (Demonstrating Settings-Only Selection) -->
+      <div class="flex items-center gap-2 bg-slate-900 border border-slate-800 px-3 py-1.5 rounded-lg text-xs">
+        <span class="text-slate-400">Settings Selection:</span>
+        <span class="font-bold text-red-500 flex items-center gap-1.5">
+          <span class="w-2 h-2 rounded-full bg-red-600 animate-pulse"></span>
+          Netflix Pro Player Active
+        </span>
+      </div>
+    </div>
+
+    <!-- Video Player Container (Exact structure of CustomPlayer.tsx) -->
+    <div 
+      id="playerContainer"
+      class="relative w-full aspect-video bg-black rounded-lg overflow-hidden flex font-sans group select-none shadow-2xl border border-slate-800"
+      onmousemove="handleContainerMouseMove()"
+      onmouseleave="handleContainerMouseLeave()"
+    >
+      <!-- Video Element -->
+      <video
+        id="mainVideo"
+        class="w-full h-full object-contain"
+        loop
+        playsinline
+      >
+        <source src="https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4" type="video/mp4">
+      </video>
+
+      <!-- LAYER 1: VideoOverlay.tsx (Click & Double-Click Handler) -->
+      <div class="absolute inset-0 z-0 flex cursor-pointer pointer-events-auto">
+        <!-- Left: Rewind 10s on double click -->
+        <div class="w-1/3 h-full relative flex items-center justify-center" onclick="handleZoneClick('left')" ondblclick="onDoubleClickSeek('left')">
+          <div id="seekIndicatorLeft" class="hidden absolute bg-black/50 rounded-full p-4 animate-ping">
+            <span class="text-white font-bold text-xl">-10s</span>
+          </div>
+        </div>
+
+        <!-- Center: Play/Pause -->
+        <div class="w-1/3 h-full" onclick="handleZoneClick('center')"></div>
+
+        <!-- Right: Forward 10s on double click -->
+        <div class="w-1/3 h-full relative flex items-center justify-center" onclick="handleZoneClick('right')" ondblclick="onDoubleClickSeek('right')">
+          <div id="seekIndicatorRight" class="hidden absolute bg-black/50 rounded-full p-4 animate-ping">
+            <span class="text-white font-bold text-xl">+10s</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- SKIP INTRO BUTTON (Exact CustomPlayer.tsx line 268-277) -->
+      <div id="skipIntroContainer" class="absolute bottom-[20%] sm:bottom-24 right-4 sm:right-10 z-40 pointer-events-auto">
+        <button
+          onclick="handleSkipIntro()"
+          class="bg-black/60 hover:bg-white hover:text-black border border-white/40 text-white font-bold py-1.5 sm:py-2 px-3 sm:px-5 rounded transition-all flex items-center gap-2 text-[10px] sm:text-sm shadow-2xl backdrop-blur-md group"
+        >
+          <svg class="w-3 h-3 sm:w-4 sm:h-4 fill-current" viewBox="0 0 24 24">
+            <path d="M5 4l10 8-10 8V4zm12 0v16h2V4h-2z" />
+          </svg>
+          Skip Intro
+        </button>
+      </div>
+
+      <!-- NEXT EPISODE PROMPT (Exact CustomPlayer.tsx line 280-295) -->
+      <div id="nextPromptContainer" class="hidden absolute bottom-[20%] sm:bottom-24 right-4 sm:right-10 w-60 sm:w-80 bg-black/80 backdrop-blur-lg border border-white/20 rounded-lg p-2.5 sm:p-4 flex items-center gap-3 sm:gap-4 z-40 animate-in slide-in-from-right shadow-2xl pointer-events-auto">
+        <div class="w-16 sm:w-24 aspect-video bg-gray-800 rounded overflow-hidden shrink-0">
+          <img src="https://images.unsplash.com/photo-1574375927938-d5a98e8ffe85?w=300&q=80" class="w-full h-full object-cover" />
+        </div>
+        <div class="flex flex-col min-w-0 flex-1">
+          <span id="txtCountdownNext" class="text-gray-400 text-[9px] sm:text-xs font-bold">Next in 15s</span>
+          <span class="text-white text-[11px] sm:text-sm font-bold line-clamp-1">Episode 2: The Weirdo on Maple Street</span>
+        </div>
+        <button onclick="handlePlayNext()" class="w-8 h-8 sm:w-10 sm:h-10 rounded-full bg-white/20 hover:bg-white flex items-center justify-center shrink-0 group transition">
+          <svg class="w-4 h-4 sm:w-5 sm:h-5 fill-white group-hover:fill-black" viewBox="0 0 24 24"><path d="M6 4l15 8-15 8z" /></svg>
+        </button>
+      </div>
+
+      <!-- LAYER 2: UI CONTROLS (CustomPlayer.tsx line 298-343) -->
+      <div 
+        id="uiControlsLayer"
+        class="absolute inset-0 z-10 transition-opacity duration-300 pointer-events-none flex flex-col justify-between p-2 sm:p-4 md:p-8 bg-gradient-to-t from-black/95 via-transparent to-black/70"
+      >
+        <!-- TOP CONTROLS (Exact TopControls.tsx) -->
+        <div class="flex justify-between items-start pointer-events-auto drop-shadow-md z-20">
+          <!-- Back button: exact SVG <path d="M19 12H5M12 19l-7-7 7-7" /> -->
+          <button onclick="triggerToast('Back clicked')" class="text-white hover:text-gray-300 transition p-1 sm:p-2">
+            <svg class="w-6 h-6 sm:w-8 sm:h-8" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <path d="M19 12H5M12 19l-7-7 7-7" />
+            </svg>
+          </button>
+
+          <!-- Season dropdown button & popup -->
+          <div class="flex items-center gap-2 sm:gap-4 relative">
+            <button
+              onclick="toggleMenu('season')"
+              class="flex items-center gap-1 sm:gap-2 bg-black/50 hover:bg-black/70 border border-white/20 text-white rounded-md px-2 py-1 sm:px-3 sm:py-1.5 transition-colors backdrop-blur-md font-medium text-[10px] sm:text-sm"
+            >
+              <span id="currentSeasonLabel">Season 1</span>
+              <svg id="seasonChevron" class="w-3 h-3 sm:w-4 sm:h-4 transition-transform duration-200" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M6 9l6 6 6-6" />
+              </svg>
+            </button>
+
+            <!-- Season popup list -->
+            <div id="seasonPopup" class="hidden absolute top-full right-0 mt-2 w-32 sm:w-48 bg-black/95 backdrop-blur-md rounded-lg border border-white/10 overflow-hidden shadow-2xl z-50 max-h-48 sm:max-h-64 overflow-y-auto custom-scrollbar">
+              <button onclick="selectSeason(1)" class="w-full text-left px-3 py-2 sm:px-4 sm:py-3 text-[10px] sm:text-sm transition-colors flex items-center justify-between bg-white/20 text-white font-bold">
+                <span class="truncate">Season 1</span>
+                <div class="w-1.5 h-1.5 rounded-full bg-red-500 shadow-[0_0_8px_rgba(239,68,68,0.8)]"></div>
+              </button>
+              <button onclick="selectSeason(2)" class="w-full text-left px-3 py-2 sm:px-4 sm:py-3 text-[10px] sm:text-sm transition-colors flex items-center justify-between text-gray-300 hover:bg-white/10">
+                <span class="truncate">Season 2</span>
+              </button>
+              <button onclick="selectSeason(3)" class="w-full text-left px-3 py-2 sm:px-4 sm:py-3 text-[10px] sm:text-sm transition-colors flex items-center justify-between text-gray-300 hover:bg-white/10">
+                <span class="truncate">Season 3</span>
+              </button>
+              <button onclick="selectSeason(4)" class="w-full text-left px-3 py-2 sm:px-4 sm:py-3 text-[10px] sm:text-sm transition-colors flex items-center justify-between text-gray-300 hover:bg-white/10">
+                <span class="truncate">Season 4</span>
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <!-- CENTER CONTROLS (Exact CenterControls.tsx) -->
+        <div id="centerControls" class="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 flex items-center gap-6 sm:gap-12 pointer-events-auto transition-all duration-300 z-20 opacity-100 scale-100">
+          <!-- Rewind 10s: exact SVG with text "10" -->
+          <button onclick="handleSeek(-10)" class="text-white hover:scale-110 transition opacity-80 hover:opacity-100 drop-shadow-2xl">
+            <svg class="w-8 h-8 sm:w-10 sm:h-10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" />
+              <path strokeLinecap="round" strokeLinejoin="round" d="M3 3v5h5" />
+              <text x="12" y="16" text-anchor="middle" fill="currentColor" stroke="none" font-size="8" font-weight="bold" font-family="sans-serif">10</text>
+            </svg>
+          </button>
+
+          <!-- Center Play/Pause button with circle r="10.5" and strokeWidth="1.2" -->
+          <button onclick="togglePlay()" class="text-white hover:scale-110 transition drop-shadow-2xl">
+            <svg id="centerPlayIcon" class="w-12 h-12 sm:w-16 sm:h-16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.2">
+              <circle cx="12" cy="12" r="10.5" />
+              <polygon points="10 8 16 12 10 16 10 8" fill="currentColor" stroke="none" />
+            </svg>
+            <svg id="centerPauseIcon" class="hidden w-12 h-12 sm:w-16 sm:h-16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.2">
+              <circle cx="12" cy="12" r="10.5" />
+              <rect x="9" y="8" width="2" height="8" fill="currentColor" stroke="none" />
+              <rect x="13" y="8" width="2" height="8" fill="currentColor" stroke="none" />
+            </svg>
+          </button>
+
+          <!-- Forward 10s: exact SVG with text "10" -->
+          <button onclick="handleSeek(10)" class="text-white hover:scale-110 transition opacity-80 hover:opacity-100 drop-shadow-2xl">
+            <svg class="w-8 h-8 sm:w-10 sm:h-10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M21 12a9 9 0 1 1-9-9 9.75 9.75 0 0 1 6.74 2.74L21 8" />
+              <path strokeLinecap="round" strokeLinejoin="round" d="M21 3v5h-5" />
+              <text x="12" y="16" text-anchor="middle" fill="currentColor" stroke="none" font-size="8" font-weight="bold" font-family="sans-serif">10</text>
+            </svg>
+          </button>
+        </div>
+
+        <!-- BOTTOM CONTROLS (Exact BottomControls.tsx) -->
+        <div class="w-full flex flex-col gap-2 sm:gap-4 pointer-events-auto z-20">
+          <div class="flex justify-between items-end gap-2">
+            <!-- Left: exact typography, season, tags, episode title, description -->
+            <div class="text-white flex-1 min-w-0 max-w-[75%] md:max-w-[60%] lg:max-w-2xl drop-shadow-[0_2px_4px_rgba(0,0,0,0.8)] pb-1 sm:pb-0">
+              <h3 class="text-[10px] sm:text-sm font-medium text-gray-200 mb-0.5 sm:mb-1 truncate">Stranger Things</h3>
+              <div class="flex items-center gap-1.5 sm:gap-2 text-[9px] sm:text-xs text-gray-300 mb-0.5 sm:mb-2 overflow-hidden whitespace-nowrap">
+                <span class="shrink-0">Season 1</span>
+                <span class="shrink-0 border border-gray-400 px-1 rounded bg-black/20">16+</span>
+                <span class="hidden sm:inline shrink-0">2016</span>
+                <span class="hidden sm:inline shrink-0">•</span>
+                <span class="hidden sm:inline truncate">Sci-Fi, Horror, Drama</span>
+                <span class="shrink-0 border border-gray-400 px-1 rounded bg-black/20">HD</span>
+              </div>
+              <h1 class="text-base sm:text-3xl md:text-4xl font-bold mb-1 sm:mb-2 drop-shadow-lg truncate">Chapter One: The Vanishing of Will Byers</h1>
+              <div class="hidden md:block pr-4">
+                <p class="text-xs sm:text-sm text-gray-300 line-clamp-2 leading-relaxed">
+                  On his way home from a friend's house, young Will Byers sees something terrifying. Nearby, a sinister secret lurks in the depths of a government lab.
+                </p>
+              </div>
+            </div>
+
+            <!-- Right: Exact buttons row (Play, Time, Episodes, Audio/Sub, Settings Gear, Fullscreen) -->
+            <div class="flex items-center gap-1 sm:gap-4 text-white relative shrink-0">
+              <!-- Mini Play/Pause button -->
+              <button onclick="togglePlay()" class="hover:text-gray-300 transition p-1.5 sm:p-2 hidden sm:block">
+                <svg id="miniPlayIcon" class="w-5 h-5 sm:w-6 sm:h-6" viewBox="0 0 24 24" fill="currentColor">
+                  <polygon points="5 3 19 12 5 21 5 3" />
+                </svg>
+                <svg id="miniPauseIcon" class="hidden w-5 h-5 sm:w-6 sm:h-6" viewBox="0 0 24 24" fill="currentColor">
+                  <rect x="6" y="4" width="4" height="16" />
+                  <rect x="14" y="4" width="4" height="16" />
+                </svg>
+              </button>
+
+              <!-- Time display: 00:00 / 00:00 -->
+              <div class="flex items-center gap-1 text-[10px] sm:text-sm font-medium drop-shadow-md whitespace-nowrap mr-1 sm:mr-0">
+                <span id="txtCurrentTime">00:00</span>
+                <span class="text-gray-400 hidden sm:inline">/</span>
+                <span id="txtDuration" class="text-gray-400 hidden sm:inline">00:00</span>
+              </div>
+
+              <!-- Episodes Button (Exact SVG) -->
+              <button onclick="toggleMenu('episodes')" class="hover:text-gray-300 transition p-1.5 sm:p-2" title="Episode List">
+                <svg class="w-5 h-5 sm:w-6 sm:h-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <path d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" />
+                </svg>
+              </button>
+
+              <!-- Audio & Subtitles Button (Exact SVG speech bubble) -->
+              <button onclick="toggleMenu('audioSub')" class="hover:text-gray-300 transition p-1.5 sm:p-2 relative" title="Audio & Subtitles">
+                <svg class="w-5 h-5 sm:w-6 sm:h-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path>
+                  <path d="M8 10h.01M12 10h.01M16 10h.01"></path>
+                </svg>
+              </button>
+
+              <!-- Settings Gear Button (Exact SVG cog) -->
+              <button onclick="toggleMenu('settings')" class="hover:text-gray-300 transition p-1.5 sm:p-2 relative" title="Speed & Quality">
+                <svg class="w-5 h-5 sm:w-6 sm:h-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <circle cx="12" cy="12" r="3"></circle>
+                  <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
+                </svg>
+              </button>
+
+              <!-- Fullscreen Button (Exact SVG) -->
+              <button onclick="toggleFullscreen()" class="hover:text-gray-300 transition p-1.5 sm:p-2 relative block" title="Fullscreen">
+                <svg id="iconFullscreen" class="w-5 h-5 sm:w-6 sm:h-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3" />
+                </svg>
+                <svg id="iconExitFullscreen" class="hidden w-5 h-5 sm:w-6 sm:h-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <path d="M8 3v3a2 2 0 0 1-2 2H3m18 0h-3a2 2 0 0 1-2-2V3m0 18v-3a2 2 0 0 1 2-2h3M3 16h3a2 2 0 0 1 2 2v3" />
+                </svg>
+              </button>
+
+              <!-- POPUP: Audio & Subtitles (Exact BottomControls.tsx line 91-114) -->
+              <div id="audioSubPopup" class="hidden absolute bottom-full right-0 sm:right-10 mb-4 sm:mb-6 w-[280px] sm:w-96 bg-black/95 backdrop-blur-md rounded-lg border border-white/10 p-3 sm:p-4 flex gap-4 sm:gap-6 z-50 shadow-2xl max-h-[160px] sm:max-h-[220px]">
+                <div class="flex-1 flex flex-col min-h-0">
+                  <div class="text-[11px] sm:text-sm font-bold text-gray-300 mb-2 border-b border-white/20 pb-1 shrink-0">Audio</div>
+                  <div class="flex-1 overflow-y-auto custom-scrollbar pr-2 min-h-0">
+                    <button class="block w-full text-left text-[10px] sm:text-sm py-1.5 text-white font-bold">
+                      <span class="text-red-500 mr-1 sm:mr-2">✓</span> English [Original 5.1]
+                    </button>
+                    <button class="block w-full text-left text-[10px] sm:text-sm py-1.5 text-gray-400 hover:text-white transition">
+                      Hindi (BDIX Dubbed)
+                    </button>
+                    <button class="block w-full text-left text-[10px] sm:text-sm py-1.5 text-gray-400 hover:text-white transition">
+                      Bengali Audio
+                    </button>
+                  </div>
+                </div>
+                <div class="flex-1 flex flex-col min-h-0">
+                  <div class="text-[11px] sm:text-sm font-bold text-gray-300 mb-2 border-b border-white/20 pb-1 shrink-0">Subtitles</div>
+                  <div class="flex-1 overflow-y-auto custom-scrollbar pr-2 min-h-0">
+                    <button class="block w-full text-left text-[10px] sm:text-sm py-1.5 text-gray-400 hover:text-white transition">
+                      Off
+                    </button>
+                    <button class="block w-full text-left text-[10px] sm:text-sm py-1.5 text-white font-bold">
+                      <span class="text-red-500 mr-1 sm:mr-2">✓</span> English [CC]
+                    </button>
+                    <button class="block w-full text-left text-[10px] sm:text-sm py-1.5 text-gray-400 hover:text-white transition">
+                      Spanish
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              <!-- POPUP: Settings (Speed & Quality) (Exact BottomControls.tsx line 116-139) -->
+              <div id="settingsPopup" class="hidden absolute bottom-full right-0 mb-4 sm:mb-6 w-[260px] sm:w-80 bg-black/95 backdrop-blur-md rounded-lg border border-white/10 p-3 sm:p-4 flex gap-4 sm:gap-6 z-50 shadow-2xl max-h-[160px] sm:max-h-[220px]">
+                <div class="flex-1 flex flex-col min-h-0">
+                  <div class="text-[11px] sm:text-sm font-bold text-gray-300 mb-2 border-b border-white/20 pb-1 shrink-0">Speed</div>
+                  <div class="flex-1 overflow-y-auto custom-scrollbar pr-2 min-h-0">
+                    <button onclick="setSpeed(0.5)" class="block w-full text-left text-[10px] sm:text-sm py-1.5 text-gray-400 hover:text-white transition" id="sp_05">0.5x</button>
+                    <button onclick="setSpeed(0.75)" class="block w-full text-left text-[10px] sm:text-sm py-1.5 text-gray-400 hover:text-white transition" id="sp_075">0.75x</button>
+                    <button onclick="setSpeed(1.0)" class="block w-full text-left text-[10px] sm:text-sm py-1.5 text-white font-bold" id="sp_1"><span class="text-red-500 mr-1 sm:mr-2">✓</span> Normal</button>
+                    <button onclick="setSpeed(1.25)" class="block w-full text-left text-[10px] sm:text-sm py-1.5 text-gray-400 hover:text-white transition" id="sp_125">1.25x</button>
+                    <button onclick="setSpeed(1.5)" class="block w-full text-left text-[10px] sm:text-sm py-1.5 text-gray-400 hover:text-white transition" id="sp_15">1.5x</button>
+                    <button onclick="setSpeed(2.0)" class="block w-full text-left text-[10px] sm:text-sm py-1.5 text-gray-400 hover:text-white transition" id="sp_2">2x</button>
+                  </div>
+                </div>
+                <div class="flex-1 flex flex-col min-h-0">
+                  <div class="text-[11px] sm:text-sm font-bold text-gray-300 mb-2 border-b border-white/20 pb-1 shrink-0">Quality</div>
+                  <div class="flex-1 overflow-y-auto custom-scrollbar pr-2 min-h-0">
+                    <button class="block w-full text-left text-[10px] sm:text-sm py-1.5 text-white font-bold">
+                      <span class="text-red-500 mr-1 sm:mr-2">✓</span> 1080p FHD
+                    </button>
+                    <button class="block w-full text-left text-[10px] sm:text-sm py-1.5 text-gray-400 hover:text-white transition">720p HD</button>
+                    <button class="block w-full text-left text-[10px] sm:text-sm py-1.5 text-gray-400 hover:text-white transition">480p SD</button>
+                    <button class="block w-full text-left text-[10px] sm:text-sm py-1.5 text-gray-400 hover:text-white transition">Auto</button>
+                  </div>
+                </div>
+              </div>
+
+            </div>
+          </div>
+
+          <!-- PROGRESS BAR (Exact BottomControls.tsx line 144-162) -->
+          <div
+            id="progressBar"
+            class="w-full h-1 sm:h-1.5 bg-white/30 rounded-full cursor-pointer group hover:h-1.5 sm:hover:h-2 transition-all relative flex items-center"
+            onclick="handleProgressClick(event)"
+            onmousemove="handleProgressMouseMove(event)"
+            onmouseleave="handleProgressMouseLeave()"
+          >
+            <div id="progressPlayed" class="h-full bg-red-600 rounded-full relative transition-all duration-150 w-[18%]">
+              <div class="absolute right-[-6px] sm:right-[-8px] top-1/2 -translate-y-1/2 w-3 h-3 sm:w-4 sm:h-4 bg-red-600 rounded-full shadow-lg scale-0 group-hover:scale-100 transition-transform z-20"></div>
+            </div>
+
+            <!-- Hover Time Tooltip Bubble (Exact line 154-161) -->
+            <div
+              id="hoverTooltip"
+              class="hidden absolute top-[-35px] -translate-x-1/2 bg-black/90 text-white text-[10px] sm:text-xs font-bold py-1 px-2 rounded shadow-lg pointer-events-none z-30"
+              style="left: 0px;"
+            >
+              00:00
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- LAYER 3: SIDEBAR MENU EPISODES (EpisodeList.tsx) -->
+      <div id="episodesSidebar" class="hidden absolute top-0 right-0 h-full w-72 sm:w-96 bg-black/95 backdrop-blur-lg border-l border-white/10 z-50 p-4 flex flex-col pointer-events-auto transition-transform shadow-2xl">
+        <div class="flex items-center justify-between pb-3 border-b border-white/10 shrink-0">
+          <h2 class="text-sm sm:text-base font-bold text-white">Episodes (Season 1)</h2>
+          <button onclick="toggleMenu('none')" class="text-gray-400 hover:text-white p-1">✕</button>
+        </div>
+        <div class="flex-1 overflow-y-auto custom-scrollbar space-y-3 pt-3">
+          <!-- Ep 1 -->
+          <div class="p-2.5 rounded-lg bg-white/10 border border-white/20 flex gap-3 cursor-pointer">
+            <div class="w-20 aspect-video bg-gray-800 rounded overflow-hidden shrink-0 relative">
+              <img src="https://images.unsplash.com/photo-1574375927938-d5a98e8ffe85?w=200&q=80" class="w-full h-full object-cover" />
+              <div class="absolute inset-0 bg-red-600/30 flex items-center justify-center font-bold text-xs">▶</div>
+            </div>
+            <div class="min-w-0 flex-1">
+              <div class="text-xs font-bold text-white truncate">1. Chapter One: The Vanishing of Will Byers</div>
+              <div class="text-[10px] text-gray-400 line-clamp-2 mt-0.5">Will Byers sees something terrifying on his way home.</div>
+            </div>
+          </div>
+          <!-- Ep 2 -->
+          <div onclick="selectEpisode(2)" class="p-2.5 rounded-lg bg-black/40 hover:bg-white/5 border border-white/5 flex gap-3 cursor-pointer transition">
+            <div class="w-20 aspect-video bg-gray-800 rounded overflow-hidden shrink-0">
+              <img src="https://images.unsplash.com/photo-1574375927938-d5a98e8ffe85?w=200&q=80" class="w-full h-full object-cover opacity-75" />
+            </div>
+            <div class="min-w-0 flex-1">
+              <div class="text-xs font-bold text-gray-300 truncate">2. Chapter Two: The Weirdo on Maple Street</div>
+              <div class="text-[10px] text-gray-500 line-clamp-2 mt-0.5">Mike hides the mysterious girl in his bedroom.</div>
+            </div>
+          </div>
+          <!-- Ep 3 -->
+          <div onclick="selectEpisode(3)" class="p-2.5 rounded-lg bg-black/40 hover:bg-white/5 border border-white/5 flex gap-3 cursor-pointer transition">
+            <div class="w-20 aspect-video bg-gray-800 rounded overflow-hidden shrink-0">
+              <img src="https://images.unsplash.com/photo-1574375927938-d5a98e8ffe85?w=200&q=80" class="w-full h-full object-cover opacity-75" />
+            </div>
+            <div class="min-w-0 flex-1">
+              <div class="text-xs font-bold text-gray-300 truncate">3. Chapter Three: Holly, Jolly</div>
+              <div class="text-[10px] text-gray-500 line-clamp-2 mt-0.5">An increasingly frantic Joyce tries to communicate with Will.</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+    </div>
+
+    <!-- Live Toast Alert -->
+    <div id="toastPill" class="hidden fixed bottom-6 left-1/2 -translate-x-1/2 px-4 py-2 bg-black/90 border border-red-600 text-white text-xs font-bold rounded-full shadow-2xl z-50 flex items-center gap-2">
+      <span class="w-2 h-2 rounded-full bg-red-600 animate-ping"></span>
+      <span id="toastText">Skipped Intro (+85s)</span>
+    </div>
+
+    <!-- Inspector Verification Panel -->
+    <div class="grid grid-cols-1 md:grid-cols-3 gap-4 pt-2">
+      <div class="p-4 rounded-xl bg-slate-900 border border-slate-800 space-y-2.5">
+        <div class="text-xs font-bold text-white flex items-center gap-2">
+          <span class="w-2 h-2 rounded-full bg-red-600"></span>
+          Exact Symbol & Icon Verification
+        </div>
+        <p class="text-xs text-slate-400">All SVGs are pulled 1:1 directly from the repository source:</p>
+        <ul class="text-[11px] text-slate-300 space-y-1 font-mono">
+          <li>• Back: <span class="text-white">M19 12H5M12 19l-7-7 7-7</span></li>
+          <li>• Rewind: <span class="text-white">Circle with embedded "10" text</span></li>
+          <li>• Center Play: <span class="text-white">Circle r=10.5 + triangle polygon</span></li>
+          <li>• Center Pause: <span class="text-white">Circle r=10.5 + 2 rects</span></li>
+          <li>• Audio/Sub: <span class="text-white">Speech bubble M21 15a2...</span></li>
+          <li>• Settings: <span class="text-white">Gear cog circle r=3 + path</span></li>
+        </ul>
+      </div>
+
+      <div class="p-4 rounded-xl bg-slate-900 border border-slate-800 space-y-2.5">
+        <div class="text-xs font-bold text-white flex items-center gap-2">
+          <span class="w-2 h-2 rounded-full bg-blue-500"></span>
+          Interactive Triggers
+        </div>
+        <p class="text-xs text-slate-400">Click to preview states:</p>
+        <div class="space-y-1.5 text-xs">
+          <button onclick="toggleSkipIntroVisibility()" class="w-full py-1.5 px-2.5 bg-slate-800 hover:bg-slate-700 rounded text-left flex justify-between font-bold">
+            <span>Toggle "Skip Intro" Button</span>
+            <span id="btnSkipIntroState" class="text-green-400 font-mono">VISIBLE</span>
+          </button>
+          <button onclick="toggleNextPromptVisibility()" class="w-full py-1.5 px-2.5 bg-slate-800 hover:bg-slate-700 rounded text-left flex justify-between font-bold">
+            <span>Toggle "Next Episode" Prompt</span>
+            <span id="btnNextPromptState" class="text-slate-400 font-mono">HIDDEN</span>
+          </button>
+          <button onclick="toggleMenu('episodes')" class="w-full py-1.5 px-2.5 bg-slate-800 hover:bg-slate-700 rounded text-left flex justify-between font-bold">
+            <span>Toggle Episodes Drawer</span>
+            <span class="text-slate-400 font-mono">DRAWER</span>
+          </button>
+        </div>
+      </div>
+
+      <div class="p-4 rounded-xl bg-slate-900 border border-slate-800 space-y-2.5">
+        <div class="text-xs font-bold text-white flex items-center gap-2">
+          <span class="w-2 h-2 rounded-full bg-emerald-500"></span>
+          Player Selection in Settings Only
+        </div>
+        <p class="text-xs text-slate-400">As requested, there is <strong class="text-white">NO</strong> player switcher button inside the player HUD.</p>
+        <div class="p-2 rounded bg-black/60 border border-slate-800 text-[11px] text-slate-300 space-y-1 font-mono">
+          <div>UserDefaults: <span class="text-emerald-400 font-bold">"preferredPlayerStyle"</span></div>
+          <div>In-Player HUD: <span class="text-green-400">Clean (Zero switchers)</span></div>
+          <div>Settings View: <span class="text-yellow-400">Only place to choose player</span></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const video = document.getElementById('mainVideo');
+    let isPlaying = false;
+    let activeMenu = 'none';
+    let hideTimer = null;
+    let lastClickTime = 0;
+    let lastClickZone = '';
+
+    function formatTime(seconds) {
+      if (!seconds || isNaN(seconds)) return '00:00';
+      const m = Math.floor(seconds / 60);
+      const s = Math.floor(seconds % 60);
+      return `${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
+    }
+
+    function togglePlay() {
+      if (video.paused) {
+        video.play().then(() => {
+          isPlaying = true;
+          updatePlayState(true);
+        }).catch(() => {});
+      } else {
+        video.pause();
+        isPlaying = false;
+        updatePlayState(false);
+      }
+      resetHideTimer();
+    }
+
+    function updatePlayState(playing) {
+      document.getElementById('centerPlayIcon').classList.toggle('hidden', playing);
+      document.getElementById('centerPauseIcon').classList.toggle('hidden', !playing);
+      document.getElementById('miniPlayIcon').classList.toggle('hidden', playing);
+      document.getElementById('miniPauseIcon').classList.toggle('hidden', !playing);
+
+      const centerControls = document.getElementById('centerControls');
+      if (playing) {
+        centerControls.className = "absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 flex items-center gap-6 sm:gap-12 pointer-events-auto transition-all duration-300 z-20 opacity-0 scale-90 pointer-events-none";
+      } else {
+        centerControls.className = "absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 flex items-center gap-6 sm:gap-12 pointer-events-auto transition-all duration-300 z-20 opacity-100 scale-100";
+      }
+    }
+
+    function handleSeek(amount) {
+      if (video.duration) {
+        video.currentTime = Math.max(0, Math.min(video.duration, video.currentTime + amount));
+      }
+      triggerToast((amount > 0 ? '+' : '') + amount + 's');
+      resetHideTimer();
+    }
+
+    function onDoubleClickSeek(direction) {
+      handleSeek(direction === 'left' ? -10 : 10);
+      const indicator = direction === 'left' ? document.getElementById('seekIndicatorLeft') : document.getElementById('seekIndicatorRight');
+      indicator.classList.remove('hidden');
+      setTimeout(() => indicator.classList.add('hidden'), 500);
+    }
+
+    function handleZoneClick(zone) {
+      const now = Date.now();
+      if (zone === lastClickZone && (now - lastClickTime) < 320) {
+        onDoubleClickSeek(zone === 'left' ? 'left' : 'right');
+        lastClickTime = 0;
+      } else {
+        lastClickZone = zone;
+        lastClickTime = now;
+        togglePlay();
+        toggleMenu('none');
+      }
+    }
+
+    function toggleMenu(menu) {
+      activeMenu = activeMenu === menu ? 'none' : menu;
+      document.getElementById('seasonPopup').classList.toggle('hidden', activeMenu !== 'season');
+      document.getElementById('audioSubPopup').classList.toggle('hidden', activeMenu !== 'audioSub');
+      document.getElementById('settingsPopup').classList.toggle('hidden', activeMenu !== 'settings');
+      document.getElementById('episodesSidebar').classList.toggle('hidden', activeMenu !== 'episodes');
+      
+      const chevron = document.getElementById('seasonChevron');
+      if (chevron) {
+        chevron.classList.toggle('rotate-180', activeMenu === 'season');
+      }
+      resetHideTimer();
+    }
+
+    function setSpeed(spd) {
+      video.playbackRate = spd;
+      ['sp_05', 'sp_075', 'sp_1', 'sp_125', 'sp_15', 'sp_2'].forEach(id => {
+        const el = document.getElementById(id);
+        if (el) {
+          el.className = "block w-full text-left text-[10px] sm:text-sm py-1.5 text-gray-400 hover:text-white transition";
+          el.innerHTML = el.innerText.replace('✓ ', '');
+        }
+      });
+      const activeEl = document.getElementById('sp_' + (spd === 1.0 ? '1' : spd.toString().replace('.', '')));
+      if (activeEl) {
+        activeEl.className = "block w-full text-left text-[10px] sm:text-sm py-1.5 text-white font-bold";
+        activeEl.innerHTML = `<span class="text-red-500 mr-1 sm:mr-2">✓</span> ${spd === 1 ? 'Normal' : spd + 'x'}`;
+      }
+      toggleMenu('none');
+      triggerToast('Speed: ' + spd + 'x');
+    }
+
+    function handleSkipIntro() {
+      if (video.duration) {
+        video.currentTime = Math.min(video.duration, video.currentTime + 85);
+      }
+      document.getElementById('skipIntroContainer').classList.add('hidden');
+      document.getElementById('btnSkipIntroState').textContent = 'SKIPPED';
+      triggerToast('Skipped Opening Credits (+85s)');
+    }
+
+    function handlePlayNext() {
+      triggerToast('Playing Episode 2…');
+      document.getElementById('nextPromptContainer').classList.add('hidden');
+    }
+
+    function toggleSkipIntroVisibility() {
+      const el = document.getElementById('skipIntroContainer');
+      const isHidden = el.classList.contains('hidden');
+      el.classList.toggle('hidden', !isHidden);
+      document.getElementById('btnSkipIntroState').textContent = isHidden ? 'VISIBLE' : 'HIDDEN';
+    }
+
+    function toggleNextPromptVisibility() {
+      const el = document.getElementById('nextPromptContainer');
+      const isHidden = el.classList.contains('hidden');
+      el.classList.toggle('hidden', !isHidden);
+      document.getElementById('btnNextPromptState').textContent = isHidden ? 'VISIBLE' : 'HIDDEN';
+    }
+
+    function handleContainerMouseMove() {
+      const layer = document.getElementById('uiControlsLayer');
+      layer.classList.remove('opacity-0');
+      layer.classList.add('opacity-100');
+      resetHideTimer();
+    }
+
+    function handleContainerMouseLeave() {
+      if (isPlaying && activeMenu === 'none') {
+        const layer = document.getElementById('uiControlsLayer');
+        layer.classList.add('opacity-0');
+        layer.classList.remove('opacity-100');
+      }
+    }
+
+    function resetHideTimer() {
+      clearTimeout(hideTimer);
+      if (isPlaying && activeMenu === 'none') {
+        hideTimer = setTimeout(() => {
+          const layer = document.getElementById('uiControlsLayer');
+          layer.classList.add('opacity-0');
+          layer.classList.remove('opacity-100');
+        }, 3000);
+      }
+    }
+
+    function toggleFullscreen() {
+      const container = document.getElementById('playerContainer');
+      if (!document.fullscreenElement) {
+        container.requestFullscreen().catch(() => {});
+        document.getElementById('iconFullscreen').classList.add('hidden');
+        document.getElementById('iconExitFullscreen').classList.remove('hidden');
+      } else {
+        document.exitFullscreen().catch(() => {});
+        document.getElementById('iconFullscreen').classList.remove('hidden');
+        document.getElementById('iconExitFullscreen').classList.add('hidden');
+      }
+    }
+
+    function handleProgressClick(e) {
+      if (!video.duration) return;
+      const rect = e.currentTarget.getBoundingClientRect();
+      const pos = Math.max(0, Math.min(e.clientX - rect.left, rect.width));
+      video.currentTime = (pos / rect.width) * video.duration;
+      resetHideTimer();
+    }
+
+    function handleProgressMouseMove(e) {
+      if (!video.duration) return;
+      const rect = e.currentTarget.getBoundingClientRect();
+      const pos = Math.max(0, Math.min(e.clientX - rect.left, rect.width));
+      const hoverSec = (pos / rect.width) * video.duration;
+      const tooltip = document.getElementById('hoverTooltip');
+      tooltip.style.left = pos + 'px';
+      tooltip.textContent = formatTime(hoverSec);
+      tooltip.classList.remove('hidden');
+    }
+
+    function handleProgressMouseLeave() {
+      document.getElementById('hoverTooltip').classList.add('hidden');
+    }
+
+    video.addEventListener('timeupdate', () => {
+      if (!video.duration) return;
+      const cur = video.currentTime;
+      const dur = video.duration;
+      document.getElementById('progressPlayed').style.width = ((cur / dur) * 100) + '%';
+      document.getElementById('txtCurrentTime').textContent = formatTime(cur);
+      document.getElementById('txtDuration').textContent = formatTime(dur);
+
+      if (cur >= 15 && cur <= 90) {
+        document.getElementById('skipIntroContainer').classList.remove('hidden');
+      }
+      if (dur > 0 && (dur - cur) <= 15) {
+        document.getElementById('nextPromptContainer').classList.remove('hidden');
+        document.getElementById('txtCountdownNext').textContent = `Next in ${Math.ceil(dur - cur)}s`;
+      }
+    });
+
+    video.addEventListener('loadedmetadata', () => {
+      document.getElementById('txtDuration').textContent = formatTime(video.duration);
+    });
+
+    let toastTimer = null;
+    function triggerToast(msg) {
+      clearTimeout(toastTimer);
+      const pill = document.getElementById('toastPill');
+      document.getElementById('toastText').textContent = msg;
+      pill.classList.remove('hidden');
+      toastTimer = setTimeout(() => pill.classList.add('hidden'), 2500);
+    }
+  </script>
+</body>
+</html>

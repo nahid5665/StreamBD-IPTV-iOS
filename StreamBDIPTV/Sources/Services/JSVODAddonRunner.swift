@@ -118,7 +118,7 @@ final class NativeFetchBridge: NSObject, WKScriptMessageHandlerWithReply {
                 }
 
                 if AppConfig.debugAddonLogging {
-                    addonLog("[NativeFetchBridge] \(method) \(urlString) -> \(statusCode) (bytes: \(data.count))")
+                    print("[NativeFetchBridge] \(method) \(urlString) -> \(statusCode) (bytes: \(data.count))")
                 }
 
                 let bodyText = String(data: data, encoding: .utf8)
@@ -136,7 +136,7 @@ final class NativeFetchBridge: NSObject, WKScriptMessageHandlerWithReply {
                 }
             } catch {
                 if AppConfig.debugAddonLogging {
-                    addonLog("[NativeFetchBridge] \(method) \(urlString) FAILED: \(error.localizedDescription)")
+                    print("[NativeFetchBridge] \(method) \(urlString) FAILED: \(error.localizedDescription)")
                 }
                 let errorDict: [String: Any] = [
                     "status": 0,
@@ -169,9 +169,8 @@ private final class HeadlessJSInstance: NSObject, WKNavigationDelegate {
         let config = WKWebViewConfiguration()
         config.websiteDataStore = .default() // persistent jar shared across headless instances
         let ucc = WKUserContentController()
-        // NOTE: this overload resolves to the WithReply registration because
-        // NativeFetchBridge conforms to WKScriptMessageHandlerWithReply
-        // (the addScriptMessageHandlerWithReply name is deprecated in newer SDKs).
+        // Must use the WithReply registration: the JS side awaits postMessage(),
+        // which only resolves when a WKScriptMessageHandlerWithReply is registered.
         ucc.addScriptMessageHandler(fetchBridge, contentWorld: .page, name: "nativeFetch")
         config.userContentController = ucc
 
@@ -213,51 +212,16 @@ private final class HeadlessJSInstance: NSObject, WKNavigationDelegate {
     }
 
     func execute(bootstrapScript: String, pluginScript: String, invokeScript: String, arguments: [String: Any]) async throws -> Any? {
-        guard let wv = webView else {
-            addonLog("[JSVODAddonRunner] execute called with no webView")
-            return nil
+        guard let wv = webView else { return nil }
+
+        if !bootstrapScript.isEmpty {
+            _ = try await wv.evaluateJavaScript(bootstrapScript)
         }
 
-        do {
-            if !bootstrapScript.isEmpty {
-                // Mirror the Android QuickJS runner (smali: "; 'ok';"): terminate
-                // every evaluated script with a plain string result so
-                // evaluateJavaScript never attempts to marshal a trailing JS
-                // function object (e.g. the window.fetch assignment) back to
-                // Swift — which throws "unsupported type".
-                _ = try await wv.evaluateJavaScript(bootstrapScript + "\n; 'ok';")
-            }
+        let moduleWrapper = "var module = { exports: {} }; var exports = module.exports;\n" + pluginScript
+        _ = try await wv.evaluateJavaScript(moduleWrapper)
 
-            // APK-parity: wrap the addon in an IIFE so top-level `return fn;`
-            // style addons (hdhub4u, NHD, ppcine, rtally, cinetv, ftpbd*, OMH,
-            // timepassbdweb, ibccl-ftp) work: the wrapper's return value is
-            // captured into module.exports. CommonJS-style addons still work
-            // because the IIFE assigns to the outer-scope `module` object.
-            let moduleWrapper = """
-                var module = { exports: {} }; var exports = module.exports;
-                var __sbdAddonResult = (function() {
-                \(pluginScript)
-                })();
-                if (typeof __sbdAddonResult === 'function') { module.exports = __sbdAddonResult; }
-                ; 'ok';
-                """
-            _ = try await wv.evaluateJavaScript(moduleWrapper)
-        } catch {
-            addonLog("[JSVODAddonRunner] bootstrap/plugin evaluate FAILED: \(error.localizedDescription)")
-            throw error
-        }
-
-        do {
-            let raw = try await wv.callAsyncJavaScript(invokeScript, arguments: arguments, in: nil, contentWorld: .page)
-            if AppConfig.debugAddonLogging {
-                let preview = String(describing: raw).prefix(300)
-                addonLog("[JSVODAddonRunner] invoke returned: \(String(describing: type(of: raw))) \(preview)")
-            }
-            return raw
-        } catch {
-            addonLog("[JSVODAddonRunner] invoke FAILED: \(error.localizedDescription)")
-            throw error
-        }
+        return try await wv.callAsyncJavaScript(invokeScript, arguments: arguments, in: nil, contentWorld: .page)
     }
 
     func destroy() {
@@ -277,7 +241,7 @@ private final class HeadlessJSInstance: NSObject, WKNavigationDelegate {
 final class JSVODAddonRunner {
     static let shared = JSVODAddonRunner()
 
-    private let limiter = ConcurrencyLimiter(maxConcurrent: 8)
+    private let limiter = ConcurrencyLimiter(maxConcurrent: 3)
     private var scriptCache: [String: String] = [:]
     private let cacheLock = NSLock()
     private var cryptoJsCache: String? = nil
@@ -310,7 +274,6 @@ final class JSVODAddonRunner {
         guard let (data, resp) = try? await URLSession.shared.data(for: req),
               (resp as? HTTPURLResponse)?.statusCode == 200,
               let text = String(data: data, encoding: .utf8), !text.isEmpty else {
-            addonLog("[JSVODAddonRunner] fetchScript \(urlString) failed or non-200")
             return nil
         }
         cacheScript(text, for: urlString)
@@ -331,7 +294,6 @@ final class JSVODAddonRunner {
 
     func resolveStreams(addon: Addon, context: MediaLookupContext) async throws -> [StreamSource] {
         guard let pluginScript = await fetchScript(from: addon.url) else {
-            addonLog("[JSVODAddonRunner] addon '\(addon.name)': script fetch failed for \(addon.url)")
             return []
         }
 
@@ -340,15 +302,8 @@ final class JSVODAddonRunner {
             limiter.release()
         }
 
-        do {
-            let result = try await withTimeout(seconds: 25.0) {
-                return try await self.executePlugin(script: pluginScript, addon: addon, context: context)
-            }
-            addonLog("[JSVODAddonRunner] addon '\(addon.name)' -> \(result.count) streams")
-            return result
-        } catch {
-            addonLog("[JSVODAddonRunner] addon '\(addon.name)' execute FAILED: \(error.localizedDescription)")
-            throw error
+        return try await withTimeout(seconds: 25.0) {
+            return try await self.executePlugin(script: pluginScript, addon: addon, context: context)
         }
     }
 
@@ -514,44 +469,6 @@ final class JSVODAddonRunner {
                 };
             }
         };
-
-        // XMLHttpRequest shim routed through the native bridge (netmirror,
-        // ibccl-ftp use XHR; the raw browser XHR would be CORS-blocked from
-        // the about-page origin).
-        function NativeXMLHttpRequest() {
-            this.readyState = 0; this.status = 0; this.responseText = '';
-            this.response = ''; this._headers = {}; this._method = 'GET'; this._url = '';
-            this.onload = null; this.onerror = null; this.onreadystatechange = null;
-        }
-        NativeXMLHttpRequest.prototype.open = function(method, url) {
-            this._method = method; this._url = url; this.readyState = 1;
-            if (this.onreadystatechange) { this.onreadystatechange(); }
-        };
-        NativeXMLHttpRequest.prototype.setRequestHeader = function(k, v) { this._headers[k] = v; };
-        NativeXMLHttpRequest.prototype.overrideMimeType = function() {};
-        NativeXMLHttpRequest.prototype.abort = function() {};
-        NativeXMLHttpRequest.prototype.send = function(body) {
-            var self = this;
-            window.fetch(self._url, { method: self._method, headers: self._headers, body: body || undefined })
-                .then(function(res) {
-                    return res.text().then(function(txt) { return { res: res, txt: txt }; });
-                })
-                .then(function(r) {
-                    self.status = r.res.status;
-                    self.responseText = r.txt;
-                    self.response = r.txt;
-                    self.readyState = 4;
-                    if (self.onreadystatechange) { self.onreadystatechange(); }
-                    if (self.onload) { self.onload(); }
-                })
-                .catch(function(e) {
-                    self.status = 0;
-                    self.readyState = 4;
-                    if (self.onreadystatechange) { self.onreadystatechange(); }
-                    if (self.onerror) { self.onerror(e); }
-                });
-        };
-        window.XMLHttpRequest = NativeXMLHttpRequest;
         """
 
         let invoke = """
@@ -602,19 +519,11 @@ final class JSVODAddonRunner {
 
     private func parseStreamSources(from rawResult: Any?, addon: Addon) -> [StreamSource] {
         if let dict = rawResult as? [String: Any], let errorMsg = dict["error"] as? String {
-            addonLog("[JSVODAddonRunner] Addon '\(addon.name)' JS runtime error: \(errorMsg)")
+            print("[JSVODAddonRunner] Addon '\(addon.name)' JS runtime error: \(errorMsg)")
             return []
         }
 
-        if rawResult == nil {
-            addonLog("[JSVODAddonRunner] Addon '\(addon.name)': invoke returned nil")
-            return []
-        }
-
-        guard let array = rawResult as? [Any] else {
-            addonLog("[JSVODAddonRunner] Addon '\(addon.name)': unexpected result type \(type(of: rawResult))")
-            return []
-        }
+        guard let array = rawResult as? [Any] else { return [] }
         var results: [StreamSource] = []
 
         for item in array {
@@ -719,7 +628,7 @@ final class SitePrewarmer {
         defer { wv.stopLoading() }
 
         if AppConfig.debugAddonLogging {
-            addonLog("[SitePrewarmer] warming \(origin)")
+            print("[SitePrewarmer] warming \(origin)")
         }
         _ = wv.load(URLRequest(url: url))
         // Let the page (and any challenge JS / redirects) settle before mirroring.
@@ -733,7 +642,7 @@ final class SitePrewarmer {
             HTTPCookieStorage.shared.setCookie(c)
         }
         if AppConfig.debugAddonLogging {
-            addonLog("[SitePrewarmer] \(origin): mirrored \(cookies.count) cookies into URLSession jar")
+            print("[SitePrewarmer] \(origin): mirrored \(cookies.count) cookies into URLSession jar")
         }
     }
 }

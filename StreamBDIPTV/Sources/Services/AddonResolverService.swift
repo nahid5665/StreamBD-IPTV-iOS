@@ -10,32 +10,11 @@ final class AddonResolverService {
     private let defaultUA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
     private let androidUA = "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.0.0 Mobile Safari/537.36"
 
-    /// Short-lived result cache so revisiting the same title (or retrying a
-    /// lookup) is instant instead of re-scraping all 23 addons.
-    private var resultCache: [String: (streams: [StreamSource], date: Date)] = [:]
-    private let cacheLock = NSLock()
-    private let cacheTTL: TimeInterval = 600
-
     private init() {}
-
-    private func cacheKey(addon: Addon, context: MediaLookupContext) -> String {
-        "\(addon.id)|\(context.tmdbId)|\(context.isTV)|\(context.season ?? 0)|\(context.episode ?? 0)"
-    }
 
     /// Executes a single addon with strict timeout isolation
     func resolve(addon: Addon, context: MediaLookupContext) async throws -> [StreamSource] {
-        let key = cacheKey(addon: addon, context: context)
-        cacheLock.lock()
-        if let hit = resultCache[key], Date().timeIntervalSince(hit.date) < cacheTTL {
-            cacheLock.unlock()
-            if AppConfig.debugAddonLogging {
-                addonLog("[AddonResolver] \(addon.name) -> \(hit.streams.count) streams (cache hit)")
-            }
-            return hit.streams
-        }
-        cacheLock.unlock()
-
-        let streams = try await withTimeout(seconds: 45.0) {
+        return try await withTimeout(seconds: 45.0) {
             let lowerName = addon.name.lowercased()
             let lowerId = addon.id.lowercased()
             let url = addon.url.lowercased()
@@ -89,18 +68,6 @@ final class AddonResolverService {
             // 5. Generic Addon Fallback
             return await self.resolveGenericAddon(addon: addon, context: context)
         }
-        if AppConfig.debugAddonLogging {
-            addonLog("[AddonResolver] \(addon.name) -> \(streams.count) streams")
-        }
-        cacheLock.lock()
-        resultCache[key] = (streams, Date())
-        // Opportunistic eviction: drop expired entries while we hold the lock.
-        if resultCache.count > 200 {
-            let now = Date()
-            resultCache = resultCache.filter { now.timeIntervalSince($0.value.date) < cacheTTL }
-        }
-        cacheLock.unlock()
-        return streams
     }
 
     // MARK: - 1. RoarZone EMBY Resolver (PlaybackInfo API + Direct / HLS Streams)

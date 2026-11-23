@@ -39,75 +39,33 @@ final class MainViewModel: ObservableObject {
     }
 
     init() {
-        // Live channel refresh hook: TokenRefreshManager refreshes the BDTube
-        // server list on its schedule and hands the fresh list back here so
-        // cached URLs are swapped without touching active playback.
-        TokenRefreshManager.shared.liveChannelRefresher = { [weak self] freshChannels in
-            self?.applyRefreshedLiveChannels(freshChannels)
-        }
         Task {
             await TokenRefreshManager.shared.refreshAllTokens()
         }
     }
 
-    /// Preloads the live TV server (BDTube Live)
+    /// Preloads essential playlists (StreamBD IPTV & AKASH GO)
     func loadInitialPlaylists() async {
         guard allChannels.isEmpty else { return }
         isLoading = true
 
-        if let bd = playlists.first(where: { $0.name == "BDTube Live" }) {
-            let channels = await loadChannels(for: bd)
-            if !channels.isEmpty {
-                self.allChannels = channels
+        // 1. First load the official StreamBD IPTV (170 verified channels)
+        if let sbd = playlists.first(where: { $0.name == "StreamBD IPTV" }) {
+            let sbdChannels = await loadChannels(for: sbd)
+            if !sbdChannels.isEmpty {
+                self.allChannels = sbdChannels
+            }
+        }
+
+        // 2. Also load AKASH GO as secondary fallback
+        if let akash = playlists.first(where: { $0.name == "AKASH GO" }) {
+            let akashChannels = await loadChannels(for: akash)
+            if self.allChannels.isEmpty {
+                self.allChannels = akashChannels
             }
         }
 
         isLoading = false
-    }
-
-    /// Swaps refreshed BDTube URLs into the cache/allChannels by normalized
-    /// name (the widget matched by server id; the name is our stable key since
-    /// Channel.id embeds the URL, which changes on every signed refresh).
-    /// Open players keep streaming their old URL until it dies — the next
-    /// tap/retry picks up the fresh token, exactly like the Samsung widget.
-    private func applyRefreshedLiveChannels(_ fresh: [Channel]) {
-        guard !fresh.isEmpty else { return }
-
-        // Preserve logo when the API omits it on refresh
-        var updated = fresh
-        if let cached = playlistChannelsCache["BDTube Live"] {
-            let oldByName = Dictionary(cached.map { (BDTubeService.key($0.name), $0) },
-                                       uniquingKeysWith: { a, _ in a })
-            updated = fresh.map { ch in
-                guard let old = oldByName[BDTubeService.key(ch.name)], ch.logo.isEmpty else { return ch }
-                return Channel(
-                    name: ch.name,
-                    url: ch.url,
-                    logo: old.logo,
-                    group: ch.group,
-                    sources: ["Default": ch.url]
-                )
-            }
-        }
-        playlistChannelsCache["BDTube Live"] = updated
-
-        // Mirror the swap into allChannels (search + global grid): replace
-        // refreshed URLs in place, keep unrelated channels, append new ones.
-        var freshByName = Dictionary(updated.map { (BDTubeService.key($0.name), $0) },
-                                     uniquingKeysWith: { a, _ in a })
-        var result: [Channel] = []
-        result.reserveCapacity(allChannels.count + freshByName.count)
-        for ch in allChannels {
-            if let freshCh = freshByName.removeValue(forKey: BDTubeService.key(ch.name)) {
-                result.append(freshCh)
-            } else {
-                result.append(ch)
-            }
-        }
-        for (_, ch) in freshByName.sorted(by: { $0.key < $1.key }) {
-            result.append(ch)
-        }
-        allChannels = result
     }
 
     /// Loads channels for a specific playlist (from cache or network)
@@ -131,11 +89,6 @@ final class MainViewModel: ObservableObject {
     /// Fetches and parses playlist content with token injection and JSON/M3U auto-detection
     static func fetchPlaylistChannels(playlist: EmbeddedPlaylist) async -> [Channel] {
         let urlStr = playlist.url
-
-        // BDTube live server: dedicated service (fetch + normalize + block list)
-        if urlStr.hasPrefix("bdtube://") {
-            return await BDTubeService.shared.refresh()
-        }
 
         if urlStr.hasPrefix("myiptv://proxy") {
             return await fetchMagicProxyChannels(proxyUrl: urlStr, defaultGroup: playlist.name)

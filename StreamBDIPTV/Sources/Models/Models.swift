@@ -232,25 +232,6 @@ struct TmdbSeasonDetailResponse: Codable {
     let episodes: [TmdbEpisode]?
 }
 
-struct TmdbCastMember: Identifiable, Codable, Hashable {
-    let id: Int
-    let name: String?
-    let character: String?
-    let profile_path: String?
-
-    var displayName: String { name ?? "Unknown" }
-    var role: String { character ?? "" }
-    var photoURL: URL? {
-        guard let p = profile_path, !p.isEmpty else { return nil }
-        return URL(string: "https://image.tmdb.org/t/p/w185\(p)")
-    }
-}
-
-struct TmdbCredits: Codable {
-    let cast: [TmdbCastMember]?
-    let crew: [TmdbCastMember]?
-}
-
 struct PlaybackRequest: Identifiable, Hashable {
     let id: UUID
     let url: URL
