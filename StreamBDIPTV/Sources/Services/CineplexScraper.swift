@@ -20,6 +20,8 @@ final class CineplexScraper {
         return s.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
+    private var activeUAStrategy: (label: String, ua: String?)? = nil
+
     /// Scrapes cineplexbd.net in real-time for direct BDIX MP4 / HLS streams
     func resolveStreams(title: String, isTV: Bool = false, season: Int = 1, episode: Int = 1) async -> [StreamSource] {
         // APK-parity: warm the site in a real WebKit session first so any JS
@@ -46,14 +48,20 @@ final class CineplexScraper {
             // Step 1: Visit view.php to establish session and capture initial session cookie
             var viewCookie = ""
             if let vUrl = URL(string: viewUrlStr) {
-                var vReq = URLRequest(url: vUrl)
-                vReq.setValue(userAgent, forHTTPHeaderField: "User-Agent")
-                vReq.setValue("\(baseUrl)/", forHTTPHeaderField: "Referer")
-                vReq.timeoutInterval = 5
-                if let (_, vResp) = try? await URLSession.shared.data(for: vReq),
-                   let httpResp = vResp as? HTTPURLResponse {
+            var vReq = URLRequest(url: vUrl)
+            applyActiveUA(to: &vReq)
+            vReq.setValue("\(baseUrl)/", forHTTPHeaderField: "Referer")
+            vReq.timeoutInterval = 8
+            do {
+                let (_, vResp) = try await URLSession.shared.data(for: vReq)
+                if let httpResp = vResp as? HTTPURLResponse {
+                    addonLog("[CineplexScraper] view.php?id=\(candidate.id) -> HTTP \(httpResp.statusCode)")
                     viewCookie = Self.extractCookies(from: httpResp, for: vUrl)
                 }
+            } catch {
+                addonLog("[CineplexScraper] view.php?id=\(candidate.id) ERROR \(error.localizedDescription)")
+                continue
+            }
             }
 
             // Step 2: Request player.php (movie) or watch.php (series) with captured cookie and referer
@@ -63,15 +71,28 @@ final class CineplexScraper {
 
             guard let pUrl = URL(string: pUrlStr) else { continue }
             var pReq = URLRequest(url: pUrl)
-            pReq.setValue(userAgent, forHTTPHeaderField: "User-Agent")
+            applyActiveUA(to: &pReq)
             pReq.setValue(viewUrlStr, forHTTPHeaderField: "Referer")
             if !viewCookie.isEmpty {
                 pReq.setValue(viewCookie, forHTTPHeaderField: "Cookie")
             }
-            pReq.timeoutInterval = 6
+            pReq.timeoutInterval = 8
 
-            guard let (pData, pResp) = try? await URLSession.shared.data(for: pReq),
-                  let pHtml = String(data: pData, encoding: .utf8) else { continue }
+            let pData: Data
+            let pResp: URLResponse
+            do {
+                (pData, pResp) = try await URLSession.shared.data(for: pReq)
+            } catch {
+                addonLog("[CineplexScraper] \(isCandidateTV ? "watch.php" : "player.php")?id=\(candidate.id) ERROR \(error.localizedDescription)")
+                continue
+            }
+            guard let pHtml = Self.decodeHTMLBody(pData) else {
+                addonLog("[CineplexScraper] player response undecodable for id \(candidate.id)")
+                continue
+            }
+            if let httpResp = pResp as? HTTPURLResponse {
+                addonLog("[CineplexScraper] \(isCandidateTV ? "watch" : "player").php?id=\(candidate.id) -> HTTP \(httpResp.statusCode), \(pData.count) bytes")
+            }
 
             var playerCookie = ""
             if let httpResp = pResp as? HTTPURLResponse {
@@ -100,7 +121,10 @@ final class CineplexScraper {
                 }
             }
 
-            guard let streamPath = rawStream else { continue }
+            guard let streamPath = rawStream else {
+                addonLog("[CineplexScraper] candidate \(candidate.id): no videoSrc/source found in player HTML")
+                continue
+            }
 
             let fullUrl: String
             if streamPath.hasPrefix("http://") || streamPath.hasPrefix("https://") {
@@ -134,6 +158,50 @@ final class CineplexScraper {
         return streamSources
     }
 
+    /// Applies the UA strategy that won during search (session default / iOS
+    /// Safari / desktop Chrome) so view.php and player.php are fetched the
+    /// same way the site accepted.
+    private func applyActiveUA(to request: inout URLRequest) {
+        if let strategy = activeUAStrategy {
+            if let ua = strategy.ua {
+                request.setValue(ua, forHTTPHeaderField: "User-Agent")
+            }
+            // nil strategy UA = session default: intentionally no explicit header
+        } else {
+            request.setValue(userAgent, forHTTPHeaderField: "User-Agent")
+        }
+    }
+
+    /// Robust HTML body decoder. The site serves bodies that are NOT valid
+    /// UTF-8 (96,519-byte search responses decode to nil with plain utf8),
+    /// so fall back through UTF-16 BOM detection and ISO-Latin-1 (which
+    /// always succeeds). Strips a raw gzip wrapper defensively if present.
+    static func decodeHTMLBody(_ data: Data) -> String? {
+        var payload = data
+        // gzip magic (1f 8b): URLSession normally decompresses, but handle a
+        // raw gzipped body defensively (strip 10-byte header + 8-byte trailer,
+        // then zlib-inflate the raw deflate stream).
+        if payload.count > 18, payload[payload.startIndex] == 0x1f, payload[payload.index(after: payload.startIndex)] == 0x8b {
+            let deflated = payload.dropFirst(10).dropLast(8)
+            if let inflated = try? (deflated as NSData).decompressed(using: .zlib) {
+                payload = inflated as Data
+            }
+        }
+
+        if let s = String(data: payload, encoding: .utf8) { return s }
+
+        if payload.count >= 2 {
+            let b0 = payload[payload.startIndex]
+            let b1 = payload[payload.index(after: payload.startIndex)]
+            if (b0 == 0xFF && b1 == 0xFE) || (b0 == 0xFE && b1 == 0xFF) {
+                return String(data: payload, encoding: .utf16)
+            }
+        }
+
+        // ISO-Latin-1 maps every byte, so this only fails for the truly binary case.
+        return String(data: payload, encoding: .isoLatin1)
+    }
+
     /// Robust Set-Cookie extraction: case-insensitive header scan, HTTPCookie
     /// parsing, then shared-jar fallback. URLSession may fold Set-Cookie headers
     /// into HTTPCookieStorage and omit them from allHeaderFields entirely.
@@ -155,7 +223,7 @@ final class CineplexScraper {
         }
 
         if collected.isEmpty {
-            let jar = HTTPCookieStorage.shared.cookies(for: url)
+            let jar = HTTPCookieStorage.shared.cookies(for: url) ?? []
             for c in jar {
                 collected.append("\(c.name)=\(c.value)")
             }
@@ -168,8 +236,8 @@ final class CineplexScraper {
             if seen.insert(c).inserted { unique.append(c) }
         }
         let result = unique.joined(separator: "; ")
-        if AppConfig.debugAddonLogging && !result.isEmpty {
-            print("[CineplexScraper] cookies from \(url.path): \(result.count) chars")
+        if AppConfig.debugAddonLogging {
+            addonLog("[CineplexScraper] cookies from \(url.path): \(result.count) chars")
         }
         return result
     }
@@ -177,18 +245,55 @@ final class CineplexScraper {
     private func searchCandidates(query: String) async -> [(kind: String, id: String, title: String)] {
         guard let encoded = query.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed),
               let searchUrl = URL(string: "\(baseUrl)/search.php?q=\(encoded)") else {
+            addonLog("[CineplexScraper] invalid search URL for '\(query)'")
             return []
         }
 
-        var searchReq = URLRequest(url: searchUrl)
-        searchReq.setValue(userAgent, forHTTPHeaderField: "User-Agent")
-        searchReq.timeoutInterval = 7
+        // UA strategies, most-proven first: the diagnostics probe (session default
+        // UA, no explicit header) is confirmed to reach the site, so try that
+        // before assuming a specific browser UA. The first strategy that both
+        // fetches successfully AND yields candidates wins.
+        let strategies: [(label: String, ua: String?)] = [
+            ("session-default", nil),
+            ("ios-safari", AppConfig.browserUserAgent),
+            ("desktop-chrome", userAgent)
+        ]
 
-        guard let (searchData, _) = try? await URLSession.shared.data(for: searchReq),
-              let html = String(data: searchData, encoding: .utf8) else {
-            return []
+        var best: [(kind: String, id: String, title: String)] = []
+
+        for strategy in strategies {
+            var req = URLRequest(url: searchUrl)
+            if let ua = strategy.ua {
+                req.setValue(ua, forHTTPHeaderField: "User-Agent")
+            }
+            req.timeoutInterval = 10
+
+            do {
+                let (data, resp) = try await URLSession.shared.data(for: req)
+                let code = (resp as? HTTPURLResponse)?.statusCode ?? -1
+                guard let html = Self.decodeHTMLBody(data), !html.isEmpty else {
+                    let head = data.prefix(16).map { String(format: "%02x", $0) }.joined(separator: " ")
+                    addonLog("[CineplexScraper] search via \(strategy.label): HTTP \(code), \(data.count) bytes UNDECODABLE (head: \(head))")
+                    continue
+                }
+
+                let parsed = parseCandidates(from: html, query: query)
+                addonLog("[CineplexScraper] search via \(strategy.label): HTTP \(code), \(data.count) bytes -> \(parsed.count) candidates")
+                if parsed.count > best.count { best = parsed }
+                if !parsed.isEmpty {
+                    activeUAStrategy = strategy
+                    return parsed
+                }
+            } catch {
+                addonLog("[CineplexScraper] search via \(strategy.label): ERROR \(error.localizedDescription)")
+            }
         }
 
+        addonLog("[CineplexScraper] search '\(query)' -> \(best.count) candidates (after all UA strategies)")
+        return best
+    }
+
+    private func parseCandidates(from html: String, query: String) -> [(kind: String, id: String, title: String)] {
         var candidates: [(kind: String, id: String, title: String)] = []
         var seenIds = Set<String>()
 
@@ -251,9 +356,6 @@ final class CineplexScraper {
             }
         }
 
-        if AppConfig.debugAddonLogging {
-            print("[CineplexScraper] search '\(query)' -> \(candidates.count) candidates")
-        }
         return candidates
     }
 }

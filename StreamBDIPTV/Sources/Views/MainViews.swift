@@ -309,7 +309,7 @@ struct NetflixHomeView: View {
             HStack {
                 Text("Featured IPTV Playlists").font(.title3.bold()).foregroundStyle(.white)
                 Spacer()
-                Text("44 Playlists")
+                Text("\(liveVM.playlists.count) Server\(liveVM.playlists.count == 1 ? "" : "s")")
                     .font(.caption.bold())
                     .foregroundStyle(Color(red: 0.4, green: 0.6, blue: 1.0))
             }
@@ -695,8 +695,8 @@ struct LiveTVNetflixView: View {
                 }
             }
             .background(Color.black.ignoresSafeArea())
-            .navigationTitle("Live Playlists (44)")
-            .searchable(text: $viewModel.searchQuery, prompt: "Search 44 playlists…")
+            .navigationTitle("Live TV (\(viewModel.playlists.count))")
+            .searchable(text: $viewModel.searchQuery, prompt: "Search live TV servers…")
             .sheet(item: $viewModel.activePlaylist) { pl in
                 PlaylistChannelListView(playlist: pl, viewModel: viewModel)
             }
@@ -824,11 +824,11 @@ struct NetflixMediaDetailSheet: View {
     @ObservedObject var vodVM: VODViewModel
     @Environment(\.dismiss) private var dismiss
 
-    @State private var availableStreams: [StreamSource] = []
+    // Live addon results: bound directly to vodVM.availableStreams so streams
+    // appear progressively as each addon resolves (not all at once at the end).
     @State private var activePlayback: PlaybackRequest? = nil
     @State private var playbackAlertText: String? = nil
     @State private var showPlaybackAlert: Bool = false
-    @State private var isLoadingStreams = true
     @State private var selectedSeason = 1
     @State private var selectedEpisode = 1
     @State private var seasons: [TmdbSeason] = []
@@ -874,7 +874,7 @@ struct NetflixMediaDetailSheet: View {
 
                     // Main Action Play Button
                     Button {
-                        if let first = availableStreams.first {
+                        if let first = vodVM.availableStreams.first {
                             playSource(first)
                         }
                     } label: {
@@ -953,7 +953,7 @@ struct NetflixMediaDetailSheet: View {
                             }
                         }
 
-                        if isLoadingStreams && availableStreams.isEmpty {
+                        if vodVM.isResolvingAddons && vodVM.availableStreams.isEmpty {
                             HStack(spacing: 10) {
                                 ProgressView().tint(Color(red: 0.4, green: 0.6, blue: 1.0))
                                 Text("Checking BDIX servers & addons in parallel…")
@@ -961,7 +961,7 @@ struct NetflixMediaDetailSheet: View {
                                     .foregroundStyle(.gray)
                             }
                             .padding(.horizontal, 16)
-                        } else if availableStreams.isEmpty && !isLoadingStreams {
+                        } else if vodVM.availableStreams.isEmpty && !vodVM.isResolvingAddons {
                             VStack(alignment: .leading, spacing: 8) {
                                 Text("No playable streams found on checked addons for this title.")
                                     .font(.caption)
@@ -984,7 +984,7 @@ struct NetflixMediaDetailSheet: View {
                             .padding(.horizontal, 16)
                         } else {
                             VStack(spacing: 10) {
-                                ForEach(availableStreams) { source in
+                                ForEach(vodVM.availableStreams) { source in
                                     Button {
                                         playSource(source)
                                     } label: {
@@ -1010,6 +1010,29 @@ struct NetflixMediaDetailSheet: View {
                                                 .padding(.vertical, 4)
                                                 .background(Color.white.opacity(0.08))
                                                 .clipShape(Capsule())
+
+                                            // Hand this stream to the installed VLC app
+                                            if source.type != "embed" {
+                                                Button {
+                                                    let opened = VLCAppIntegration.open(
+                                                        streamURL: source.url,
+                                                        title: source.provider ?? media.displayTitle
+                                                    )
+                                                    if !opened {
+                                                        playbackAlertText = "VLC app not found on this iPhone."
+                                                        showPlaybackAlert = true
+                                                    }
+                                                } label: {
+                                                    Image(systemName: "cone.fill")
+                                                        .font(.system(size: 14, weight: .bold))
+                                                        .foregroundStyle(.orange)
+                                                        .padding(.horizontal, 8)
+                                                        .padding(.vertical, 5)
+                                                        .background(Color.orange.opacity(0.18))
+                                                        .clipShape(Capsule())
+                                                }
+                                                .buttonStyle(ScaleButtonStyle(scale: 0.9))
+                                            }
 
                                             Image(systemName: "play.circle.fill")
                                                 .font(.title3)
@@ -1127,7 +1150,6 @@ struct NetflixMediaDetailSheet: View {
     }
 
     private func loadStreams() async {
-        isLoadingStreams = true
         if !media.isMovie && seasons.isEmpty {
             seasons = await vodVM.fetchTvSeasons(tvId: media.id)
             if let first = seasons.first {
@@ -1135,8 +1157,8 @@ struct NetflixMediaDetailSheet: View {
                 episodes = await vodVM.fetchSeasonEpisodes(tvId: media.id, seasonNumber: first.season_number)
             }
         }
-        availableStreams = await vodVM.resolveStreams(for: media, season: selectedSeason, episode: selectedEpisode)
-        isLoadingStreams = false
+        // Results stream into vodVM.availableStreams live as each addon resolves.
+        _ = await vodVM.resolveStreams(for: media, season: selectedSeason, episode: selectedEpisode)
     }
 
     private func playSource(_ source: StreamSource) {
@@ -1145,6 +1167,16 @@ struct NetflixMediaDetailSheet: View {
             showPlaybackAlert = true
             return
         }
+
+        // Settings -> External Player: hand the stream to the installed VLC app.
+        // Embed pages can't be played by VLC — they always stay in-app.
+        if PlayerDestination.current == .vlcApp,
+           source.type != "embed",
+           VLCAppIntegration.isVLCInstalled {
+            let handedOff = VLCAppIntegration.open(streamURL: source.url, title: source.provider ?? media.displayTitle)
+            if handedOff { return }
+        }
+
         let isEmbed = (source.type == "embed")
         activePlayback = PlaybackRequest(
             url: url,
@@ -1359,15 +1391,16 @@ struct SettingsNetflixView: View {
     @ObservedObject var vodVM: VODViewModel
     @ObservedObject var liveVM: MainViewModel
 
-    @AppStorage("preferredPlayerStyle") private var selectedPlayerStyle: String = PlayerStyle.netflixPro.rawValue
-    @AppStorage("defaultSkipIntroSeconds") private var skipIntroDuration: Double = 85.0
-    @AppStorage("autoShowSkipIntro") private var autoShowSkipIntro: Bool = true
-    @AppStorage("defaultEnginePreference") private var defaultEnginePreference: String = "auto"
-
     @State private var newAddonName: String = ""
     @State private var newAddonUrl: String = ""
     @State private var addonAlert: String? = nil
     @State private var showAddonAlert: Bool = false
+    @State private var showAddonDiagnostics: Bool = false
+    @AppStorage(PlayerSettings.storageKey) private var playerPreferenceRaw: String = PlayerEnginePreference.auto.rawValue
+    @AppStorage(PlayerDestination.storageKey) private var playerDestinationRaw: String = PlayerDestination.inApp.rawValue
+    @AppStorage("preferredPlayerStyle") private var preferredPlayerStyle: String = PlayerStyle.netflixPro.rawValue
+    @AppStorage("defaultSkipIntroSeconds") private var skipIntroDuration: Double = 85.0
+    @AppStorage("autoShowSkipIntro") private var autoShowSkipIntro: Bool = true
 
     var body: some View {
         NavigationStack {
@@ -1378,185 +1411,12 @@ struct SettingsNetflixView: View {
                         Text("Settings")
                             .font(.largeTitle.bold())
                             .foregroundStyle(.white)
-                        Text("Player Engine, Addons & Streaming Configuration")
+                        Text("Addons, Streams & Player Configuration")
                             .font(.caption)
                             .foregroundStyle(.gray)
                     }
                     .padding(.horizontal, 20)
                     .padding(.top, 16)
-
-                    // Video Player UI Selection Card (Netflix Pro vs Classic)
-                    VStack(alignment: .leading, spacing: 14) {
-                        HStack {
-                            Label("Video Player Interface", systemImage: "tv.and.mediabox")
-                                .font(.headline)
-                                .foregroundStyle(.white)
-                            Spacer()
-                            Text(selectedPlayerStyle == PlayerStyle.netflixPro.rawValue ? "Netflix Pro Active" : "Classic Active")
-                                .font(.caption.bold())
-                                .foregroundStyle(selectedPlayerStyle == PlayerStyle.netflixPro.rawValue ? Color(red: 0.9, green: 0.1, blue: 0.1) : Color.blue)
-                        }
-
-                        Text("Choose which video player interface you want for Live TV, Movies & Series streaming.")
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
-
-                        VStack(spacing: 12) {
-                            // Option 1: Netflix Pro Player
-                            Button {
-                                withAnimation(.easeInOut(duration: 0.2)) {
-                                    selectedPlayerStyle = PlayerStyle.netflixPro.rawValue
-                                }
-                            } label: {
-                                HStack(spacing: 14) {
-                                    ZStack {
-                                        Circle()
-                                            .fill(Color(red: 0.898, green: 0.035, blue: 0.078).opacity(0.2))
-                                            .frame(width: 44, height: 44)
-                                        Image(systemName: "play.tv.fill")
-                                            .font(.system(size: 20, weight: .bold))
-                                            .foregroundStyle(Color(red: 0.898, green: 0.035, blue: 0.078))
-                                    }
-
-                                    VStack(alignment: .leading, spacing: 3) {
-                                        HStack(spacing: 8) {
-                                            Text("Netflix Pro Player")
-                                                .font(.subheadline.bold())
-                                                .foregroundStyle(.white)
-                                            Text("RECOMMENDED")
-                                                .font(.system(size: 9, weight: .heavy))
-                                                .foregroundStyle(.white)
-                                                .padding(.horizontal, 6)
-                                                .padding(.vertical, 2)
-                                                .background(Color(red: 0.898, green: 0.035, blue: 0.078))
-                                                .clipShape(Capsule())
-                                        }
-
-                                        Text("Netflix UI, Skip Intro button, Screen Lock, double-tap 10s gestures, speed control & episode drawer.")
-                                            .font(.caption2)
-                                            .foregroundStyle(.secondary)
-                                            .lineLimit(2)
-                                    }
-
-                                    Spacer()
-
-                                    Image(systemName: selectedPlayerStyle == PlayerStyle.netflixPro.rawValue ? "checkmark.circle.fill" : "circle")
-                                        .font(.title3)
-                                        .foregroundStyle(selectedPlayerStyle == PlayerStyle.netflixPro.rawValue ? Color(red: 0.898, green: 0.035, blue: 0.078) : .gray)
-                                }
-                                .padding(14)
-                                .background(
-                                    RoundedRectangle(cornerRadius: 14, style: .continuous)
-                                        .fill(selectedPlayerStyle == PlayerStyle.netflixPro.rawValue ? Color(red: 0.898, green: 0.035, blue: 0.078).opacity(0.12) : Color.white.opacity(0.04))
-                                )
-                                .overlay(
-                                    RoundedRectangle(cornerRadius: 14, style: .continuous)
-                                        .stroke(selectedPlayerStyle == PlayerStyle.netflixPro.rawValue ? Color(red: 0.898, green: 0.035, blue: 0.078).opacity(0.6) : Color.white.opacity(0.08), lineWidth: 1.5)
-                                )
-                            }
-                            .buttonStyle(.plain)
-
-                            // Option 2: Classic Player
-                            Button {
-                                withAnimation(.easeInOut(duration: 0.2)) {
-                                    selectedPlayerStyle = PlayerStyle.classic.rawValue
-                                }
-                            } label: {
-                                HStack(spacing: 14) {
-                                    ZStack {
-                                        Circle()
-                                            .fill(Color.blue.opacity(0.2))
-                                            .frame(width: 44, height: 44)
-                                        Image(systemName: "play.circle.fill")
-                                            .font(.system(size: 20, weight: .bold))
-                                            .foregroundStyle(Color.blue)
-                                    }
-
-                                    VStack(alignment: .leading, spacing: 3) {
-                                        HStack(spacing: 8) {
-                                            Text("Classic Player")
-                                                .font(.subheadline.bold())
-                                                .foregroundStyle(.white)
-                                            Text("ORIGINAL")
-                                                .font(.system(size: 9, weight: .bold))
-                                                .foregroundStyle(.white.opacity(0.8))
-                                                .padding(.horizontal, 6)
-                                                .padding(.vertical, 2)
-                                                .background(Color.white.opacity(0.15))
-                                                .clipShape(Capsule())
-                                        }
-
-                                        Text("Traditional StreamBD dual-engine player interface with top back button and standard slider.")
-                                            .font(.caption2)
-                                            .foregroundStyle(.secondary)
-                                            .lineLimit(2)
-                                    }
-
-                                    Spacer()
-
-                                    Image(systemName: selectedPlayerStyle == PlayerStyle.classic.rawValue ? "checkmark.circle.fill" : "circle")
-                                        .font(.title3)
-                                        .foregroundStyle(selectedPlayerStyle == PlayerStyle.classic.rawValue ? Color.blue : .gray)
-                                }
-                                .padding(14)
-                                .background(
-                                    RoundedRectangle(cornerRadius: 14, style: .continuous)
-                                        .fill(selectedPlayerStyle == PlayerStyle.classic.rawValue ? Color.blue.opacity(0.12) : Color.white.opacity(0.04))
-                                )
-                                .overlay(
-                                    RoundedRectangle(cornerRadius: 14, style: .continuous)
-                                        .stroke(selectedPlayerStyle == PlayerStyle.classic.rawValue ? Color.blue.opacity(0.6) : Color.white.opacity(0.08), lineWidth: 1.5)
-                                )
-                            }
-                            .buttonStyle(.plain)
-                        }
-
-                        // Netflix Pro Customization Sub-Section (if Netflix Pro is active)
-                        if selectedPlayerStyle == PlayerStyle.netflixPro.rawValue {
-                            VStack(alignment: .leading, spacing: 10) {
-                                Divider().background(Color.white.opacity(0.1))
-
-                                HStack {
-                                    Label("Skip Intro Button", systemImage: "forward.end.fill")
-                                        .font(.caption.bold())
-                                        .foregroundStyle(.white)
-                                    Spacer()
-                                    Toggle("", isOn: $autoShowSkipIntro)
-                                        .labelsHidden()
-                                        .tint(Color(red: 0.898, green: 0.035, blue: 0.078))
-                                }
-
-                                if autoShowSkipIntro {
-                                    VStack(alignment: .leading, spacing: 6) {
-                                        Text("Skip Intro Duration: \(Int(skipIntroDuration)) seconds")
-                                            .font(.caption2)
-                                            .foregroundStyle(.secondary)
-
-                                        HStack(spacing: 8) {
-                                            ForEach([60.0, 75.0, 85.0, 90.0, 120.0], id: \.self) { sec in
-                                                Button {
-                                                    skipIntroDuration = sec
-                                                } label: {
-                                                    Text("\(Int(sec))s")
-                                                        .font(.caption2.bold())
-                                                        .foregroundStyle(skipIntroDuration == sec ? .white : .secondary)
-                                                        .padding(.horizontal, 10)
-                                                        .padding(.vertical, 5)
-                                                        .background(skipIntroDuration == sec ? Color(red: 0.898, green: 0.035, blue: 0.078) : Color.white.opacity(0.08))
-                                                        .clipShape(Capsule())
-                                                }
-                                                .buttonStyle(.plain)
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                            .padding(.top, 4)
-                        }
-                    }
-                    .padding(16)
-                    .liquidGlass(cornerRadius: 16, opacity: 0.5)
-                    .padding(.horizontal, 20)
 
                     // Install Custom Stremio HTTP Addon Section
                     VStack(alignment: .leading, spacing: 14) {
@@ -1564,19 +1424,19 @@ struct SettingsNetflixView: View {
                             .font(.headline)
                             .foregroundStyle(.white)
 
-                        Text("Enter any standard Stremio manifest URL (e.g. https://.../manifest.json)")
+                        Text("Paste any addon URL — a .js scraper addon (e.g. https://cdn.jsdelivr.net/gh/.../addons/movielinkbd.js) or a Stremio manifest (https://.../manifest.json)")
                             .font(.caption2)
                             .foregroundStyle(.secondary)
 
                         VStack(spacing: 12) {
-                            TextField("Addon Name (e.g. Torrentio, Cinemeta)", text: $newAddonName)
+                            TextField("Addon Name (e.g. MovieLinkBD)", text: $newAddonName)
                                 .textFieldStyle(.plain)
                                 .padding(12)
                                 .background(Color.white.opacity(0.08))
                                 .clipShape(RoundedRectangle(cornerRadius: 10))
                                 .foregroundStyle(.white)
 
-                            TextField("Manifest URL (https://.../manifest.json)", text: $newAddonUrl)
+                            TextField("Addon URL (.js scraper or /manifest.json)", text: $newAddonUrl)
                                 .textFieldStyle(.plain)
                                 .textInputAutocapitalization(.never)
                                 .autocorrectionDisabled(true)
@@ -1591,7 +1451,7 @@ struct SettingsNetflixView: View {
                             } label: {
                                 HStack(spacing: 6) {
                                     Image(systemName: "arrow.down.circle.fill")
-                                    Text("Install Stremio Addon")
+                                    Text("Install Addon")
                                         .font(.subheadline.bold())
                                 }
                                 .frame(maxWidth: .infinity)
@@ -1668,7 +1528,7 @@ struct SettingsNetflixView: View {
                                     Spacer()
 
                                     // Custom user addon can be deleted
-                                    if addon.id.hasPrefix("stremio_") {
+                                    if addon.id.hasPrefix("stremio_") || addon.id.hasPrefix("js_") {
                                         Button {
                                             vodVM.removeCustomAddon(id: addon.id)
                                         } label: {
@@ -1689,6 +1549,148 @@ struct SettingsNetflixView: View {
                                 .padding(12)
                                 .liquidGlass(cornerRadius: 12, opacity: 0.35)
                             }
+                        }
+                    }
+                    .padding(.horizontal, 20)
+
+                    // Video Player Interface (Netflix Pro vs Classic)
+                    VStack(alignment: .leading, spacing: 12) {
+                        HStack {
+                            Label("Video Player Interface", systemImage: "play.tv.fill")
+                                .font(.headline)
+                                .foregroundStyle(.white)
+                            Spacer()
+                            Text(preferredPlayerStyle == PlayerStyle.netflixPro.rawValue ? "PRO UI" : "CLASSIC")
+                                .font(.caption2.bold())
+                                .foregroundStyle(.white)
+                                .padding(.horizontal, 8)
+                                .padding(.vertical, 3)
+                                .background(preferredPlayerStyle == PlayerStyle.netflixPro.rawValue ? Color.red : Color.gray.opacity(0.6))
+                                .clipShape(Capsule())
+                        }
+
+                        Text("Choose your preferred in-app player interface. Netflix Pro provides the full Netflix UI, Skip Intro, Screen Lock, and Next Episode auto-advance.")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+
+                        Picker("Player Interface", selection: $preferredPlayerStyle) {
+                            ForEach(PlayerStyle.allCases) { style in
+                                Text(style.displayName).tag(style.rawValue)
+                            }
+                        }
+                        .pickerStyle(.segmented)
+
+                        if preferredPlayerStyle == PlayerStyle.netflixPro.rawValue {
+                            Toggle("Auto-Show Skip Intro Button", isOn: $autoShowSkipIntro)
+                                .font(.caption)
+                                .tint(.red)
+
+                            HStack {
+                                Text("Skip Intro Duration:")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                                Spacer()
+                                Text("\(Int(skipIntroDuration))s")
+                                    .font(.caption.bold())
+                                    .foregroundStyle(.white)
+                            }
+                        }
+                    }
+                    .padding(16)
+                    .liquidGlass(cornerRadius: 16, opacity: 0.5)
+                    .padding(.horizontal, 20)
+
+                    // Video Player Engine Selection
+                    VStack(alignment: .leading, spacing: 12) {
+                        Label("Video Player", systemImage: "play.rectangle.fill")
+                            .font(.headline)
+                            .foregroundStyle(.white)
+
+                        Text("Choose which engine plays your streams. VLC handles more formats (TS, MKV, RTMP) with custom headers; AVPlayer is Apple-native with AirPlay and Picture-in-Picture. Auto picks the best engine per stream and falls back automatically.")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+
+                        Picker("Player Engine", selection: $playerPreferenceRaw) {
+                            ForEach(PlayerEnginePreference.allCases) { pref in
+                                Text(pref.rawValue).tag(pref.rawValue)
+                            }
+                        }
+                        .pickerStyle(.segmented)
+                        .onChange(of: playerPreferenceRaw) { newValue in
+                            if let pref = PlayerEnginePreference(rawValue: newValue) {
+                                PlayerSettings.preference = pref
+                            }
+                        }
+
+                        Text(PlayerSettings.preference == .vlc
+                             ? "VLC engine active for all streams (MobileVLCKit)."
+                             : PlayerSettings.preference == .avPlayer
+                             ? "AVPlayer engine active for all streams (no automatic VLC fallback)."
+                             : "Auto: VLC for TS/MKV/RTMP, AVPlayer for the rest.")
+                            .font(.caption2)
+                            .foregroundStyle(.green)
+                    }
+                    .padding(16)
+                    .liquidGlass(cornerRadius: 16, opacity: 0.5)
+                    .padding(.horizontal, 20)
+
+                    // External Player (VLC App Handoff)
+                    VStack(alignment: .leading, spacing: 12) {
+                        Label("External Player", systemImage: "arrow.up.forward.app.fill")
+                            .font(.headline)
+                            .foregroundStyle(.white)
+
+                        Picker("Playback Destination", selection: $playerDestinationRaw) {
+                            ForEach(PlayerDestination.allCases) { dest in
+                                Text(dest.rawValue).tag(dest.rawValue)
+                            }
+                        }
+                        .pickerStyle(.segmented)
+                        .onChange(of: playerDestinationRaw) { newValue in
+                            if let dest = PlayerDestination(rawValue: newValue) {
+                                PlayerDestination.current = dest
+                            }
+                        }
+
+                        HStack(spacing: 6) {
+                            Image(systemName: VLCAppIntegration.isVLCInstalled ? "checkmark.circle.fill" : "xmark.circle")
+                                .foregroundStyle(VLCAppIntegration.isVLCInstalled ? .green : .gray)
+                            Text(VLCAppIntegration.isVLCInstalled
+                                 ? "VLC app detected on this iPhone."
+                                 : "VLC app not installed — download it from the App Store.")
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                        }
+
+                        Text(PlayerDestination.current == .vlcApp
+                             ? "Streams open in the VLC app. Note: custom headers (Referer/Cookie) are not forwarded, so some protected BDIX streams may refuse in VLC — use the in-app engine for those."
+                             : "Streams play inside this app with the engine chosen above.")
+                            .font(.caption2)
+                            .foregroundStyle(PlayerDestination.current == .vlcApp ? .orange : .secondary)
+                    }
+                    .padding(16)
+                    .liquidGlass(cornerRadius: 16, opacity: 0.5)
+                    .padding(.horizontal, 20)
+
+                    // Addon Diagnostics
+                    VStack(alignment: .leading, spacing: 12) {
+                        Label("Diagnostics", systemImage: "stethoscope")
+                            .font(.headline)
+                            .foregroundStyle(.white)
+
+                        Button {
+                            showAddonDiagnostics = true
+                        } label: {
+                            HStack(spacing: 6) {
+                                Image(systemName: "waveform.path")
+                                Text("Addon Diagnostics (Cineplex Test)")
+                                    .font(.subheadline.bold())
+                            }
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 12)
+                            .background(Color.white.opacity(0.08))
+                            .foregroundStyle(.white)
+                            .clipShape(RoundedRectangle(cornerRadius: 10))
                         }
                     }
                     .padding(.horizontal, 20)
@@ -1714,6 +1716,9 @@ struct SettingsNetflixView: View {
                 Button("OK", role: .cancel) { }
             } message: {
                 Text(addonAlert ?? "")
+            }
+            .sheet(isPresented: $showAddonDiagnostics) {
+                AddonDiagnosticsView()
             }
         }
     }
@@ -1741,14 +1746,24 @@ struct SettingsNetflixView: View {
             return
         }
 
-        let manifestUrl = trimmed.hasSuffix("/manifest.json") ? trimmed : (trimmed.hasSuffix("/") ? "\(trimmed)manifest.json" : "\(trimmed)/manifest.json")
-        let name = newAddonName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "Stremio Addon" : newAddonName
+        let name = newAddonName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "Custom Addon" : newAddonName
 
-        vodVM.addCustomStremioAddon(name: name, url: manifestUrl)
-        newAddonName = ""
-        newAddonUrl = ""
-        addonAlert = "Installed \(name) successfully!"
-        showAddonAlert = true
+        if trimmed.lowercased().hasSuffix(".js") {
+            // Plain JS scraper addon (streambd-libs style, jsdelivr/github.io/etc.)
+            vodVM.addCustomJSAddon(name: name, url: trimmed)
+            newAddonName = ""
+            newAddonUrl = ""
+            addonAlert = "Installed \(name) as a JS addon!"
+            showAddonAlert = true
+        } else {
+            // Stremio protocol manifest
+            let manifestUrl = trimmed.hasSuffix("/manifest.json") ? trimmed : (trimmed.hasSuffix("/") ? "\(trimmed)manifest.json" : "\(trimmed)/manifest.json")
+            vodVM.addCustomStremioAddon(name: name, url: manifestUrl)
+            newAddonName = ""
+            newAddonUrl = ""
+            addonAlert = "Installed \(name) as a Stremio addon!"
+            showAddonAlert = true
+        }
     }
 }
 
@@ -1758,7 +1773,7 @@ struct SettingsNetflixView: View {
 struct EentertainmentApp: App {
     var body: some Scene {
         WindowGroup {
-            ContentView()
+            DxRootView()
         }
     }
 }

@@ -20,6 +20,7 @@ final class VODViewModel: ObservableObject {
     @Published var isResolvingAddons: Bool = false
 
     private var imdbIdCache: [Int: String] = [:]
+    private var castCache: [Int: [TmdbCastMember]] = [:]
     private var activeLookupTask: Task<Void, Never>? = nil
 
     private let customAddonsKey = "eentertainment_custom_addons_v2"
@@ -59,6 +60,17 @@ final class VODViewModel: ObservableObject {
         saveCustomAddons()
     }
 
+    /// Adds a plain JS playlist/VOD addon (any URL ending in .js, e.g. a
+    /// jsdelivr/github.io hosted streambd-libs script). Executed by the
+    /// QuickJS/WebView runner like bundled addons.
+    func addCustomJSAddon(name: String, url: String) {
+        let clean = url.trimmingCharacters(in: .whitespacesAndNewlines)
+        let id = "js_\(UUID().uuidString.prefix(8))"
+        let addon = Addon(id: id, name: name, url: clean, enabled: true, type: "default")
+        addons.append(addon)
+        saveCustomAddons()
+    }
+
     func removeCustomAddon(id: String) {
         addons.removeAll { $0.id == id }
         saveCustomAddons()
@@ -66,7 +78,10 @@ final class VODViewModel: ObservableObject {
     }
 
     private func saveCustomAddons() {
-        let custom = addons.filter { $0.id.hasPrefix("stremio_") }
+        // Persist BOTH custom addon kinds: Stremio manifests (stremio_) and
+        // user-added JS addons (js_). Filtering only stremio_ made every
+        // manually-added .js addon vanish on the next launch.
+        let custom = addons.filter { $0.id.hasPrefix("stremio_") || $0.id.hasPrefix("js_") }
         if let data = try? JSONEncoder().encode(custom) {
             UserDefaults.standard.set(data, forKey: customAddonsKey)
         }
@@ -103,10 +118,6 @@ final class VODViewModel: ObservableObject {
             TmdbResponse<TmdbMedia>.self,
             from: "\(base)/movie/top_rated?api_key=\(key)&language=en-US"
         )
-        async let remoteAddons: [Addon]? = try? NetworkManager.shared.fetchDecodable(
-            [Addon].self,
-            from: AppConfig.addonRegistryURL
-        )
 
         let loadedMovies = (await tm)?.results ?? []
         let loadedTV = (await tv)?.results ?? []
@@ -116,13 +127,9 @@ final class VODViewModel: ObservableObject {
         self.bollywoodMovies = (await hi)?.results ?? []
         self.top10Media = Array(((await top)?.results ?? loadedMovies).prefix(10))
 
-        if let fetchedAddons = await remoteAddons, !fetchedAddons.isEmpty {
-            for fa in fetchedAddons {
-                if !self.addons.contains(where: { $0.id == fa.id }) {
-                    self.addons.append(fa)
-                }
-            }
-        }
+        // NOTE: the remote addon registry merge was intentionally removed —
+        // the addon list is exactly the 3 bundled resolvers plus whatever the
+        // user adds manually in Settings (stored in UserDefaults).
 
         if self.featuredMedia == nil {
             self.featuredMedia = loadedMovies.first ?? loadedTV.first
@@ -156,6 +163,19 @@ final class VODViewModel: ObservableObject {
         }
         imdbIdCache[tmdbId] = imdb
         return imdb
+    }
+
+    /// The title's cast & crew (TMDB credits), for the dx.bi-style circles
+    func fetchCast(tmdbId: Int, isTV: Bool) async -> [TmdbCastMember] {
+        if let cached = castCache[tmdbId] { return cached }
+        let endpoint = isTV ? "tv" : "movie"
+        let url = "\(AppConfig.tmdbBaseURL)/\(endpoint)/\(tmdbId)/credits?api_key=\(AppConfig.tmdbApiKey)&language=en-US"
+        if let res = try? await NetworkManager.shared.fetchDecodable(TmdbCredits.self, from: url) {
+            let cast = Array((res.cast ?? []).prefix(15))
+            castCache[tmdbId] = cast
+            return cast
+        }
+        return []
     }
 
     /// Resolves all available BDIX FTP servers + Global stream sources for a title using all configured addons
@@ -200,6 +220,7 @@ final class VODViewModel: ObservableObject {
                         let state: AddonLookupState = streams.isEmpty ? .unavailable : .available(streams)
                         return (addon.name, state, streams)
                     } catch {
+                        addonLog("[AddonResolver] \(addon.name) FAILED: \(error.localizedDescription)")
                         return (addon.name, .failed("Offline/Timeout"), [])
                     }
                 }

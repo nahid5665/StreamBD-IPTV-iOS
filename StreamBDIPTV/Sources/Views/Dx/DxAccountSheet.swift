@@ -60,8 +60,18 @@ struct LibraryViewPlaceholder: View {
 
 /// The player engine / destination switches, grouped like dx.bi's PlaybackSettingsView.
 struct PlaybackSettingsRow: View {
+    @AppStorage("preferredPlayerStyle") private var preferredPlayerStyle: String = PlayerStyle.netflixPro.rawValue
+
     var body: some View {
         Form {
+            Section("Player Interface Style") {
+                Picker("Interface", selection: $preferredPlayerStyle) {
+                    ForEach(PlayerStyle.allCases) { style in
+                        Text(style.displayName).tag(style.rawValue)
+                    }
+                }
+                .pickerStyle(.inline)
+            }
             Section("Engine") {
                 Picker("Player engine", selection: Binding(
                     get: { PlayerSettings.preference },
