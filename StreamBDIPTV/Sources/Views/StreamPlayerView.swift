@@ -2115,7 +2115,8 @@ struct NetflixProPlayerView: View {
             subtitleColumnView
         }
         .padding(14)
-        .frame(width: 310, maxHeight: 190)
+        .frame(width: 310)
+        .frame(maxHeight: 190)
         .background(Color.black.opacity(0.95))
         .background(.ultraThinMaterial)
         .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
@@ -2132,7 +2133,8 @@ struct NetflixProPlayerView: View {
             engineColumnView
         }
         .padding(14)
-        .frame(width: 280, maxHeight: 190)
+        .frame(width: 280)
+        .frame(maxHeight: 190)
         .background(Color.black.opacity(0.95))
         .background(.ultraThinMaterial)
         .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
