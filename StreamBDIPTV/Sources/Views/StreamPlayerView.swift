@@ -1973,111 +1973,146 @@ struct NetflixProPlayerView: View {
         }
     }
 
+    private var vlcAudioTracks: [(id: Int32, name: String)] {
+        guard let p = vlcPlayer,
+              let names = p.audioTrackNames as? [String],
+              let indexes = p.audioTrackIndexes as? [NSNumber] else { return [] }
+        return zip(indexes, names).map { (id: $0.0.int32Value, name: $0.1) }
+    }
+
+    private var vlcSubtitleTracks: [(id: Int32, name: String)] {
+        guard let p = vlcPlayer,
+              let names = p.videoSubTitlesNames as? [String],
+              let indexes = p.videoSubTitlesIndexes as? [NSNumber] else { return [] }
+        return zip(indexes, names).map { (id: $0.0.int32Value, name: $0.1) }
+    }
+
+    @ViewBuilder
+    private func popupOptionRow(title: String, isActive: Bool, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            HStack(spacing: 6) {
+                if isActive {
+                    Text("✓").foregroundStyle(Self.netflixRedAccent)
+                }
+                Text(title)
+                    .foregroundStyle(isActive ? .white : Self.gray400)
+                    .fontWeight(isActive ? .bold : .regular)
+                    .lineLimit(1)
+            }
+            .font(.system(size: 12))
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.vertical, 3)
+        }
+    }
+
+    private func popupColumnHeader(_ title: String) -> some View {
+        Text(title)
+            .font(.system(size: 13, weight: .bold))
+            .foregroundStyle(Self.gray300)
+            .padding(.bottom, 4)
+            .overlay(Rectangle().frame(height: 1).foregroundStyle(Color.white.opacity(0.2)), alignment: .bottom)
+    }
+
+    private var audioColumnView: some View {
+        let tracks = vlcAudioTracks
+        let currentIdx = vlcPlayer?.currentAudioTrackIndex ?? -1
+        return VStack(alignment: .leading, spacing: 6) {
+            popupColumnHeader("Audio")
+            ScrollView {
+                VStack(alignment: .leading, spacing: 6) {
+                    if tracks.isEmpty {
+                        popupOptionRow(title: "Default", isActive: true) {
+                            activeMenu = .none
+                            resetHideTimer()
+                        }
+                    } else {
+                        ForEach(tracks, id: \.id) { track in
+                            popupOptionRow(title: track.name, isActive: track.id == currentIdx) {
+                                vlcPlayer?.currentAudioTrackIndex = track.id
+                                statusToast = "Audio: \(track.name)"
+                                activeMenu = .none
+                                resetHideTimer()
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private var subtitleColumnView: some View {
+        let tracks = vlcSubtitleTracks
+        let currentIdx = vlcPlayer?.currentVideoSubTitleIndex ?? -1
+        return VStack(alignment: .leading, spacing: 6) {
+            popupColumnHeader("Subtitles")
+            ScrollView {
+                VStack(alignment: .leading, spacing: 6) {
+                    if tracks.isEmpty {
+                        popupOptionRow(title: "Off", isActive: true) {
+                            activeMenu = .none
+                            resetHideTimer()
+                        }
+                    } else {
+                        ForEach(tracks, id: \.id) { track in
+                            popupOptionRow(title: track.name, isActive: track.id == currentIdx) {
+                                vlcPlayer?.currentVideoSubTitleIndex = track.id
+                                statusToast = "Subtitles: \(track.name)"
+                                activeMenu = .none
+                                resetHideTimer()
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private var speedColumnView: some View {
+        let speeds: [Double] = [0.5, 0.75, 1.0, 1.25, 1.5, 2.0]
+        return VStack(alignment: .leading, spacing: 6) {
+            popupColumnHeader("Speed")
+            ScrollView {
+                VStack(alignment: .leading, spacing: 6) {
+                    ForEach(speeds, id: \.self) { speed in
+                        popupOptionRow(
+                            title: speed == 1.0 ? "Normal" : "\(String(format: "%g", speed))x",
+                            isActive: abs(playbackSpeed - speed) < 0.01
+                        ) {
+                            setPlaybackSpeed(speed)
+                            activeMenu = .none
+                            resetHideTimer()
+                        }
+                    }
+                }
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private var engineColumnView: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            popupColumnHeader("Engine")
+            ScrollView {
+                VStack(alignment: .leading, spacing: 6) {
+                    ForEach(PlayerEngine.allCases, id: \.self) { engine in
+                        popupOptionRow(title: engine.rawValue, isActive: currentEngine == engine) {
+                            switchEngine(to: engine)
+                            activeMenu = .none
+                            resetHideTimer()
+                        }
+                    }
+                }
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
     private var audioSubPopupMenu: some View {
         HStack(alignment: .top, spacing: 20) {
-            // Audio Column
-            VStack(alignment: .leading, spacing: 6) {
-                Text("Audio")
-                    .font(.system(size: 13, weight: .bold))
-                    .foregroundStyle(Self.gray300)
-                    .padding(.bottom, 4)
-                    .overlay(Rectangle().frame(height: 1).foregroundStyle(Color.white.opacity(0.2)), alignment: .bottom)
-
-                ScrollView {
-                    VStack(alignment: .leading, spacing: 6) {
-                        if let p = vlcPlayer,
-                           let names = p.audioTrackNames as? [String],
-                           let indexes = p.audioTrackIndexes as? [NSNumber],
-                           !names.isEmpty {
-                            let currentIdx = p.currentAudioTrackIndex
-                            ForEach(Array(zip(indexes, names)), id: \.0) { idx, name in
-                                let isActive = (idx.int32Value == currentIdx)
-                                Button {
-                                    p.currentAudioTrackIndex = idx.int32Value
-                                    statusToast = "Audio: \(name)"
-                                    activeMenu = .none
-                                    resetHideTimer()
-                                } label: {
-                                    HStack(spacing: 6) {
-                                        if isActive {
-                                            Text("✓").foregroundStyle(Self.netflixRedAccent)
-                                        }
-                                        Text(name)
-                                            .foregroundStyle(isActive ? .white : Self.gray400)
-                                            .fontWeight(isActive ? .bold : .regular)
-                                            .lineLimit(1)
-                                    }
-                                    .font(.system(size: 12))
-                                    .frame(maxWidth: .infinity, alignment: .leading)
-                                    .padding(.vertical, 3)
-                                }
-                            }
-                        } else {
-                            HStack(spacing: 6) {
-                                Text("✓").foregroundStyle(Self.netflixRedAccent)
-                                Text("Default")
-                                    .foregroundStyle(.white)
-                                    .fontWeight(.bold)
-                            }
-                            .font(.system(size: 12))
-                            .padding(.vertical, 3)
-                        }
-                    }
-                }
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-
-            // Subtitles Column
-            VStack(alignment: .leading, spacing: 6) {
-                Text("Subtitles")
-                    .font(.system(size: 13, weight: .bold))
-                    .foregroundStyle(Self.gray300)
-                    .padding(.bottom, 4)
-                    .overlay(Rectangle().frame(height: 1).foregroundStyle(Color.white.opacity(0.2)), alignment: .bottom)
-
-                ScrollView {
-                    VStack(alignment: .leading, spacing: 6) {
-                        if let p = vlcPlayer,
-                           let names = p.videoSubTitlesNames as? [String],
-                           let indexes = p.videoSubTitlesIndexes as? [NSNumber],
-                           !names.isEmpty {
-                            let currentIdx = p.currentVideoSubTitleIndex
-                            ForEach(Array(zip(indexes, names)), id: \.0) { idx, name in
-                                let isActive = (idx.int32Value == currentIdx)
-                                Button {
-                                    p.currentVideoSubTitleIndex = idx.int32Value
-                                    statusToast = "Subtitles: \(name)"
-                                    activeMenu = .none
-                                    resetHideTimer()
-                                } label: {
-                                    HStack(spacing: 6) {
-                                        if isActive {
-                                            Text("✓").foregroundStyle(Self.netflixRedAccent)
-                                        }
-                                        Text(name)
-                                            .foregroundStyle(isActive ? .white : Self.gray400)
-                                            .fontWeight(isActive ? .bold : .regular)
-                                            .lineLimit(1)
-                                    }
-                                    .font(.system(size: 12))
-                                    .frame(maxWidth: .infinity, alignment: .leading)
-                                    .padding(.vertical, 3)
-                                }
-                            }
-                        } else {
-                            HStack(spacing: 6) {
-                                Text("✓").foregroundStyle(Self.netflixRedAccent)
-                                Text("Off")
-                                    .foregroundStyle(.white)
-                                    .fontWeight(.bold)
-                            }
-                            .font(.system(size: 12))
-                            .padding(.vertical, 3)
-                        }
-                    }
-                }
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
+            audioColumnView
+            subtitleColumnView
         }
         .padding(14)
         .frame(width: 310, maxHeight: 190)
@@ -2093,75 +2128,8 @@ struct NetflixProPlayerView: View {
 
     private var settingsPopupMenu: some View {
         HStack(alignment: .top, spacing: 20) {
-            // Speed Column
-            VStack(alignment: .leading, spacing: 6) {
-                Text("Speed")
-                    .font(.system(size: 13, weight: .bold))
-                    .foregroundStyle(Self.gray300)
-                    .padding(.bottom, 4)
-                    .overlay(Rectangle().frame(height: 1).foregroundStyle(Color.white.opacity(0.2)), alignment: .bottom)
-
-                ScrollView {
-                    VStack(alignment: .leading, spacing: 6) {
-                        ForEach([0.5, 0.75, 1.0, 1.25, 1.5, 2.0], id: \.self) { speed in
-                            let isActive = abs(playbackSpeed - speed) < 0.01
-                            Button {
-                                setPlaybackSpeed(speed)
-                                activeMenu = .none
-                                resetHideTimer()
-                            } label: {
-                                HStack(spacing: 6) {
-                                    if isActive {
-                                        Text("✓").foregroundStyle(Self.netflixRedAccent)
-                                    }
-                                    Text(speed == 1.0 ? "Normal" : "\(String(format: "%g", speed))x")
-                                        .foregroundStyle(isActive ? .white : Self.gray400)
-                                        .fontWeight(isActive ? .bold : .regular)
-                                }
-                                .font(.system(size: 12))
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                                .padding(.vertical, 3)
-                            }
-                        }
-                    }
-                }
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-
-            // Engine & Aspect Column
-            VStack(alignment: .leading, spacing: 6) {
-                Text("Engine")
-                    .font(.system(size: 13, weight: .bold))
-                    .foregroundStyle(Self.gray300)
-                    .padding(.bottom, 4)
-                    .overlay(Rectangle().frame(height: 1).foregroundStyle(Color.white.opacity(0.2)), alignment: .bottom)
-
-                ScrollView {
-                    VStack(alignment: .leading, spacing: 6) {
-                        ForEach(PlayerEngine.allCases, id: \.self) { engine in
-                            let isActive = (currentEngine == engine)
-                            Button {
-                                switchEngine(to: engine)
-                                activeMenu = .none
-                                resetHideTimer()
-                            } label: {
-                                HStack(spacing: 6) {
-                                    if isActive {
-                                        Text("✓").foregroundStyle(Self.netflixRedAccent)
-                                    }
-                                    Text(engine.rawValue)
-                                        .foregroundStyle(isActive ? .white : Self.gray400)
-                                        .fontWeight(isActive ? .bold : .regular)
-                                }
-                                .font(.system(size: 12))
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                                .padding(.vertical, 3)
-                            }
-                        }
-                    }
-                }
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
+            speedColumnView
+            engineColumnView
         }
         .padding(14)
         .frame(width: 280, maxHeight: 190)
